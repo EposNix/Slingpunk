@@ -1,6 +1,14 @@
 import { HUD } from '../ui/HUD';
 import { PowerDraftOverlay } from '../ui/PowerDraftOverlay';
-import type { EnemyKind, HudData, ModifierRarity, ModifierState, Vector2 } from './types';
+import type {
+  EnemyKind,
+  EnemyWaveScaling,
+  HudData,
+  ModifierRarity,
+  ModifierState,
+  Vector2,
+  WaveStartAnnouncement,
+} from './types';
 import { add, clamp, distanceSq, distanceToSegmentSq, length, normalize, scale, subtract } from './utils';
 import { Orb } from './entities/Orb';
 import type { Enemy } from './entities/Enemy';
@@ -82,6 +90,7 @@ export class Game {
   private drafting = false;
   private pauseLocked = false;
   private completedWaves = 0;
+  private enemyScaling: EnemyWaveScaling;
 
   constructor(canvas: HTMLCanvasElement, hud: HUD, draft: PowerDraftOverlay) {
     this.canvas = canvas;
@@ -99,6 +108,7 @@ export class Game {
     this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
     this.lives = this.maxLives;
+    this.enemyScaling = this.createDefaultEnemyScaling();
 
     this.registerEvents();
     this.onResize();
@@ -125,9 +135,39 @@ export class Game {
     return this.orbs.some((orb) => orb.alive);
   }
 
-  onWaveStart(id: string) {
-    this.waveId = id;
-    this.hud.showToast(`Wave ${id}`);
+  onWaveStart(info: WaveStartAnnouncement) {
+    this.waveId = info.blueprintId;
+    this.enemyScaling = { ...info.scaling };
+
+    const statParts: string[] = [];
+    const hpPercent = Math.round((info.scaling.hpMultiplier - 1) * 100);
+    const countPercent = Math.round((info.scaling.countMultiplier - 1) * 100);
+    const speedPercent = Math.round((info.scaling.speedMultiplier - 1) * 100);
+    if (hpPercent > 0) {
+      statParts.push(`+${hpPercent}% HP`);
+    }
+    if (countPercent > 0) {
+      statParts.push(`+${countPercent}% swarm`);
+    }
+    if (speedPercent > 0) {
+      statParts.push(`+${speedPercent}% speed`);
+    }
+    if (info.scaling.hpBonus >= 1) {
+      statParts.push(`+${Math.round(info.scaling.hpBonus)} flat HP`);
+    }
+
+    const messageParts = [`Wave ${info.waveNumber}`];
+    if (statParts.length) {
+      messageParts.push(statParts.join(', '));
+    }
+    if (info.modifiers.length) {
+      const names = info.modifiers.map((mod) => mod.name).join(', ');
+      messageParts.push(`Mutations: ${names}`);
+    }
+
+    const duration = 2200 + info.modifiers.length * 350;
+    this.hud.showToast(messageParts.join(' · '), duration);
+    this.updateHud();
   }
 
   onWaveComplete() {
@@ -346,28 +386,35 @@ export class Game {
   }
 
   spawnEnemy(type: EnemyKind, params: { position: Vector2; hp: number; speed: number }) {
+    const scaling = this.enemyScaling;
+    const scaledHpValue = params.hp * scaling.hpMultiplier + scaling.hpBonus;
+    const minimumHp = params.hp + Math.floor(scaling.level / 3);
+    const hp = Math.max(1, Math.max(Math.round(scaledHpValue), minimumHp));
+    const speed = params.speed * scaling.speedMultiplier;
+    const spawnParams = { position: params.position, hp, speed };
+
     let enemy: Enemy;
     switch (type) {
       case 'GloobZigzag':
-        enemy = new GloobZigzag(params);
+        enemy = new GloobZigzag(spawnParams);
         break;
       case 'SplitterGloob':
-        enemy = new SplitterGloob(params);
+        enemy = new SplitterGloob(spawnParams);
         break;
       case 'ShieldyGloob':
-        enemy = new ShieldyGloob(params);
+        enemy = new ShieldyGloob(spawnParams);
         break;
       case 'Splitterling':
-        enemy = new Splitterling(params);
+        enemy = new Splitterling(spawnParams);
         break;
       case 'Magnetron':
-        enemy = new Magnetron(params);
+        enemy = new Magnetron(spawnParams);
         break;
       case 'SporePuff':
-        enemy = new SporePuff(params);
+        enemy = new SporePuff(spawnParams);
         break;
       default:
-        enemy = new GloobZigzag(params);
+        enemy = new GloobZigzag(spawnParams);
         break;
     }
     this.enemies.push(enemy);
@@ -696,6 +743,17 @@ export class Game {
     };
   }
 
+  private createDefaultEnemyScaling(): EnemyWaveScaling {
+    return {
+      level: 0,
+      hpMultiplier: 1,
+      hpBonus: 0,
+      speedMultiplier: 1,
+      countMultiplier: 1,
+      cadenceMultiplier: 1,
+    };
+  }
+
   private reset() {
     this.score = 0;
     this.comboHeat = 0;
@@ -711,6 +769,7 @@ export class Game {
     this.drafting = false;
     this.pauseLocked = false;
     this.completedWaves = 0;
+    this.enemyScaling = this.createDefaultEnemyScaling();
     this.draft.hide();
     this.waveManager.reset();
     this.updateHud();

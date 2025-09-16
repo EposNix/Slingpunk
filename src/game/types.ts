@@ -68,6 +68,28 @@ export type EnemyKind =
   | 'Magnetron'
   | 'SporePuff';
 
+export interface EnemyModifierSummary {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface EnemyWaveScaling {
+  level: number;
+  hpMultiplier: number;
+  hpBonus: number;
+  speedMultiplier: number;
+  countMultiplier: number;
+  cadenceMultiplier: number;
+}
+
+export interface WaveStartAnnouncement {
+  blueprintId: string;
+  waveNumber: number;
+  modifiers: EnemyModifierSummary[];
+  scaling: EnemyWaveScaling;
+}
+
 export interface WaveEnemyConfig {
   type: EnemyKind;
   hp: number;
