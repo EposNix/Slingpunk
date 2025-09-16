@@ -46,7 +46,7 @@ export class Orb {
 
     const homing = game.modifiers.homingStrength;
     if (homing > 0) {
-      let nearest: { dx: number; dy: number } | undefined;
+      let nearest: Vector2 | undefined;
       let closest = Infinity;
       for (const enemy of game.enemies) {
         if (!enemy.alive) continue;
@@ -55,7 +55,7 @@ export class Orb {
         const dist = dx * dx + dy * dy;
         if (dist < closest) {
           closest = dist;
-          nearest = { dx, dy };
+          nearest = { x: dx, y: dy };
         }
       }
       if (nearest) {
