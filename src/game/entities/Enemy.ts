@@ -20,6 +20,9 @@ export abstract class Enemy {
   public alive = true;
   protected elapsed = 0;
   protected baseSpeed: number;
+  private slowTimer = 0;
+  private slowFactor = 1;
+  private knockback = 0;
 
   constructor(type: EnemyKind, params: EnemyParams) {
     this.type = type;
@@ -33,6 +36,21 @@ export abstract class Enemy {
   update(dt: number, game: Game) {
     this.elapsed += dt;
     this.behavior(dt, game);
+
+    if (this.knockback > 0) {
+      this.velocity.y -= this.knockback;
+      this.knockback = Math.max(0, this.knockback - dt * 240);
+    }
+
+    if (this.slowTimer > 0) {
+      this.velocity.x *= this.slowFactor;
+      this.velocity.y *= this.slowFactor;
+      this.slowTimer = Math.max(0, this.slowTimer - dt);
+      if (this.slowTimer === 0) {
+        this.slowFactor = 1;
+      }
+    }
+
     this.position.x += this.velocity.x * dt;
     this.position.y += this.velocity.y * dt;
 
@@ -66,6 +84,17 @@ export abstract class Enemy {
       ctx.beginPath();
       ctx.arc(0, 0, this.radius + 6, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    if (this.slowTimer > 0) {
+      const slowRatio = Math.min(1, this.slowTimer);
+      ctx.strokeStyle = `rgba(134, 198, 255, ${0.2 + slowRatio * 0.5})`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 7]);
+      ctx.beginPath();
+      ctx.arc(0, 0, this.radius + 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     ctx.fillStyle = 'rgba(10, 0, 30, 0.6)';
@@ -105,6 +134,15 @@ export abstract class Enemy {
   protected onDamaged(_game: Game, _amount: number, _orb: Orb) {}
 
   protected onDeath(_game: Game, _orb: Orb) {}
+
+  public applySlow(duration: number, factor: number) {
+    this.slowTimer = Math.max(this.slowTimer, duration);
+    this.slowFactor = Math.min(this.slowFactor, Math.max(0.1, factor));
+  }
+
+  public applyKnockback(force: number) {
+    this.knockback = Math.max(this.knockback, force);
+  }
 
   protected abstract behavior(dt: number, game: Game): void;
 

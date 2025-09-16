@@ -27,14 +27,23 @@ export const distanceSq = (a: Vector2, b: Vector2) => {
   return dx * dx + dy * dy;
 };
 
+export const distanceToSegmentSq = (point: Vector2, a: Vector2, b: Vector2) => {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = point.x - a.x;
+  const apy = point.y - a.y;
+  const abLenSq = abx * abx + aby * aby;
+  if (abLenSq === 0) {
+    return distanceSq(point, a);
+  }
+  let t = (apx * abx + apy * aby) / abLenSq;
+  t = clamp(t, 0, 1);
+  const closestX = a.x + abx * t;
+  const closestY = a.y + aby * t;
+  const dx = point.x - closestX;
+  const dy = point.y - closestY;
+  return dx * dx + dy * dy;
+};
+
 export const randomRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
-export const randomChoice = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
-
-export function formatPowerUpName(name?: string) {
-  if (!name) return 'None';
-  return name
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, (c) => c.toUpperCase())
-    .trim();
-}

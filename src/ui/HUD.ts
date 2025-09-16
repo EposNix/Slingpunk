@@ -1,13 +1,9 @@
-import type { HudData, PowerUpType } from '../game/types';
+import type { HudData, RunModifierId } from '../game/types';
+import { ALL_MODIFIERS } from '../game/modifiers';
 
-const powerUpLabels: Record<PowerUpType, string> = {
-  lightning: 'Lightning',
-  shield: 'Shield Bubble',
-  multiball: 'Multiball',
-  timewarp: 'Time Warp',
-  ricochet: 'Ricochet Rune',
-  pierce: 'Pierce Core',
-};
+const modifierLabels: Record<RunModifierId, string> = Object.fromEntries(
+  ALL_MODIFIERS.map((mod) => [mod.id, mod.name]),
+) as Record<RunModifierId, string>;
 
 export class HUD {
   public readonly element: HTMLDivElement;
@@ -18,7 +14,7 @@ export class HUD {
   private readonly focusFill: HTMLDivElement;
   private readonly heartsValue: HTMLSpanElement;
   private readonly waveValue: HTMLSpanElement;
-  private readonly powerupValue: HTMLSpanElement;
+  private readonly modifierValue: HTMLSpanElement;
   private readonly pauseButton: HTMLButtonElement;
 
   private pauseHandler?: () => void;
@@ -57,9 +53,9 @@ export class HUD {
     focusBar.appendChild(this.focusFill);
     focusMetric.root.appendChild(focusBar);
 
-    const powerupMetric = this.createMetric('Power-up');
-    this.powerupValue = powerupMetric.value;
-    this.powerupValue.innerText = 'None';
+    const powerupMetric = this.createMetric('Loadout');
+    this.modifierValue = powerupMetric.value;
+    this.modifierValue.innerText = 'None yet';
 
     const leftStack = document.createElement('div');
     leftStack.style.display = 'flex';
@@ -115,10 +111,10 @@ export class HUD {
     this.focusFill.style.width = `${Math.min(100, Math.max(0, data.focus))}%`;
     this.heartsValue.innerText = '❤️'.repeat(Math.max(0, data.lives)) || '💀';
     this.waveValue.innerText = `S${data.wave}`;
-    if (data.powerUp) {
-      this.powerupValue.innerText = powerUpLabels[data.powerUp];
+    if (data.lastModifier) {
+      this.modifierValue.innerText = modifierLabels[data.lastModifier];
     } else {
-      this.powerupValue.innerText = 'None';
+      this.modifierValue.innerText = 'None yet';
     }
   }
 
