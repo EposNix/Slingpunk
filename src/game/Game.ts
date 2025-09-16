@@ -45,6 +45,27 @@ interface Particle {
   color: string;
 }
 
+interface FloatingText {
+  position: Vector2;
+  velocity: Vector2;
+  life: number;
+  maxLife: number;
+  value: string;
+  size: number;
+  color: string;
+  stroke?: string;
+  weight: number;
+  pop: number;
+}
+
+interface ImpactWave {
+  position: Vector2;
+  life: number;
+  maxLife: number;
+  maxRadius: number;
+  color: string;
+}
+
 export class Game {
   public readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -61,6 +82,12 @@ export class Game {
   public enemies: Enemy[] = [];
 
   private particles: Particle[] = [];
+  private floatingTexts: FloatingText[] = [];
+  private impactWaves: ImpactWave[] = [];
+  private screenShakeOffset: Vector2 = { x: 0, y: 0 };
+  private screenShakeTimer = 0;
+  private screenShakeDuration = 0;
+  private screenShakeIntensity = 0;
   private pointer: PointerState = {
     dragging: false,
     pointerId: null,
@@ -344,6 +371,8 @@ export class Game {
     const delta = Math.round(baseScore * multiplier);
     this.score += delta;
     this.emitScorePop(enemy.position, delta);
+    const impactRadius = enemy.isBoss || enemy.isElite ? 220 : 150;
+    this.spawnImpactWave(enemy.position, impactRadius);
 
     this.comboHeat += 1;
     this.comboTimer = 0;
@@ -383,6 +412,8 @@ export class Game {
   emitShieldBreak(position: Vector2) {
     this.spawnParticles(position, '#e0ffbf', 16, 60, 180);
     this.hud.showToast('Shield Broken!');
+    this.spawnImpactWave(position, 180, 0.4, 'rgba(224, 255, 191, 0.9)');
+    this.addScreenShake(4, 0.3);
   }
 
   emitSporeCloud(position: Vector2) {
@@ -390,15 +421,126 @@ export class Game {
   }
 
   emitScorePop(position: Vector2, score: number) {
-    const text = `+${score}`;
     this.spawnParticles(position, '#ffffff', 12, 20, 60);
-    this.particles.push({
-      position: { ...position },
-      velocity: { x: 0, y: -80 },
-      life: 0.7,
-      size: 18,
-      color: text,
+    const formatted = `+${score.toLocaleString()}`;
+    this.spawnFloatingText(formatted, position, {
+      color: '#ffe898',
+      stroke: 'rgba(80, 18, 0, 0.7)',
+      size: 38,
+      life: 1.1,
+      pop: 0.65,
+      velocity: { x: (Math.random() - 0.5) * 50, y: -150 - Math.random() * 40 },
     });
+    if (score >= 400) {
+      const magnitude = Math.min(24, 6 + score / 70);
+      this.addScreenShake(magnitude, 0.45);
+    }
+  }
+
+  emitDamageNumber(
+    position: Vector2,
+    amount: number,
+    options: { critical?: boolean; shield?: boolean } = {},
+  ) {
+    if (amount <= 0 || !Number.isFinite(amount)) {
+      return;
+    }
+    const formatted = this.formatDamageNumber(amount);
+    const magnitude = Math.sqrt(Math.max(amount, 1));
+    const baseSize = options.shield ? 22 : 26;
+    const size = baseSize + Math.min(20, magnitude * 4.2);
+    const color = options.shield
+      ? '#9cf5ff'
+      : options.critical
+        ? '#ffef9d'
+        : '#f5f3ff';
+    const stroke = options.shield
+      ? 'rgba(12, 30, 50, 0.75)'
+      : 'rgba(32, 4, 54, 0.75)';
+    const velocity = {
+      x: (Math.random() - 0.5) * (options.critical ? 70 : 40),
+      y: -120 - Math.random() * 50,
+    };
+    this.spawnFloatingText(formatted, position, {
+      color,
+      stroke,
+      size,
+      life: options.critical ? 1.1 : 0.85,
+      pop: options.critical ? 0.75 : 0.45,
+      weight: options.critical ? 800 : 700,
+      velocity,
+    });
+  }
+
+  private spawnFloatingText(
+    value: string,
+    origin: Vector2,
+    options: {
+      velocity?: Vector2;
+      color?: string;
+      stroke?: string;
+      size?: number;
+      life?: number;
+      pop?: number;
+      weight?: number;
+    } = {},
+  ) {
+    const life = options.life ?? 0.8;
+    const jitter = {
+      x: (Math.random() - 0.5) * 22,
+      y: (Math.random() - 0.5) * 16,
+    };
+    const text: FloatingText = {
+      position: { x: origin.x + jitter.x, y: origin.y + jitter.y },
+      velocity: options.velocity ? { ...options.velocity } : { x: 0, y: -120 },
+      life,
+      maxLife: life,
+      value,
+      size: options.size ?? 26,
+      color: options.color ?? '#ffffff',
+      stroke: options.stroke,
+      weight: options.weight ?? 700,
+      pop: options.pop ?? 0.4,
+    };
+    this.floatingTexts.push(text);
+  }
+
+  private spawnImpactWave(
+    position: Vector2,
+    maxRadius = 140,
+    duration = 0.45,
+    color = 'rgba(255, 189, 128, 0.9)',
+  ) {
+    this.impactWaves.push({
+      position: { ...position },
+      life: duration,
+      maxLife: duration,
+      maxRadius,
+      color,
+    });
+  }
+
+  private addScreenShake(intensity: number, duration = 0.35) {
+    if (intensity <= 0 || duration <= 0) return;
+    this.screenShakeIntensity = Math.min(28, this.screenShakeIntensity + intensity);
+    this.screenShakeDuration = Math.max(this.screenShakeDuration, duration);
+    this.screenShakeTimer = Math.max(this.screenShakeTimer, duration);
+  }
+
+  private formatDamageNumber(amount: number) {
+    if (amount >= 1000) {
+      return Math.round(amount).toLocaleString();
+    }
+    if (amount >= 100) {
+      return Math.round(amount).toString();
+    }
+    if (amount >= 10) {
+      return amount.toFixed(1).replace(/\.0$/, '');
+    }
+    if (amount >= 1) {
+      return amount.toFixed(1).replace(/\.0$/, '');
+    }
+    return amount.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
   }
 
   laneToWorld(lane: number): Vector2 {
@@ -567,6 +709,39 @@ export class Game {
     }
     this.particles = this.particles.filter((p) => p.life > 0);
 
+    for (const text of this.floatingTexts) {
+      text.life -= dt;
+      text.position = add(text.position, scale(text.velocity, dt));
+      text.velocity.x *= 0.92;
+      text.velocity.y *= 0.92;
+    }
+    this.floatingTexts = this.floatingTexts.filter((text) => text.life > 0);
+
+    for (const wave of this.impactWaves) {
+      wave.life -= dt;
+    }
+    this.impactWaves = this.impactWaves.filter((wave) => wave.life > 0);
+
+    if (this.screenShakeTimer > 0) {
+      this.screenShakeTimer = Math.max(0, this.screenShakeTimer - dt);
+      const ratio = this.screenShakeDuration > 0 ? this.screenShakeTimer / this.screenShakeDuration : 0;
+      const falloff = ratio * ratio;
+      const magnitude = this.screenShakeIntensity * falloff;
+      this.screenShakeOffset = {
+        x: (Math.random() - 0.5) * 2 * magnitude,
+        y: (Math.random() - 0.5) * 2 * magnitude,
+      };
+      if (this.screenShakeTimer <= 0.0001) {
+        this.screenShakeOffset = { x: 0, y: 0 };
+        this.screenShakeIntensity = 0;
+        this.screenShakeDuration = 0;
+      }
+    } else if (this.screenShakeIntensity !== 0) {
+      this.screenShakeOffset = { x: 0, y: 0 };
+      this.screenShakeIntensity = 0;
+      this.screenShakeDuration = 0;
+    }
+
     this.updateHud();
   }
 
@@ -634,6 +809,8 @@ export class Game {
     const explosion = this.modifiers.explosion;
     if (!explosion) return;
     this.spawnParticles(center, '#ff9a61', 18, 120, explosion.radius);
+    this.spawnImpactWave(center, explosion.radius * 1.4, 0.5, 'rgba(255, 170, 120, 0.9)');
+    this.addScreenShake(8, 0.35);
     const radiusSq = explosion.radius * explosion.radius;
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
@@ -715,6 +892,7 @@ export class Game {
     if (power < 20 || this.launchCooldown > 0 || this.lives <= 0) {
       return;
     }
+    this.spawnParticles(this.cannonPosition, '#38f3ff', 10, 200, 70);
     const direction = normalize(drag);
     const speed = (550 + clamp(power, 0, 280) * 3.2) * 3;
     const baseAngle = Math.atan2(direction.y, direction.x);
@@ -788,6 +966,12 @@ export class Game {
     this.orbs = [];
     this.enemies = [];
     this.particles = [];
+    this.floatingTexts = [];
+    this.impactWaves = [];
+    this.screenShakeOffset = { x: 0, y: 0 };
+    this.screenShakeTimer = 0;
+    this.screenShakeDuration = 0;
+    this.screenShakeIntensity = 0;
     this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
     this.playerModifierCounts.clear();
@@ -831,12 +1015,28 @@ export class Game {
   private render() {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
+    ctx.save();
+    ctx.translate(this.screenShakeOffset.x, this.screenShakeOffset.y);
 
     this.drawBackground(ctx);
     this.drawAim(ctx);
 
     for (const enemy of this.enemies) {
       enemy.draw(ctx);
+    }
+
+    for (const wave of this.impactWaves) {
+      const progress = 1 - wave.life / wave.maxLife;
+      const alpha = Math.max(0, wave.life / wave.maxLife);
+      const radius = wave.maxRadius * progress;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.lineWidth = 6 * (1 - progress) + 2;
+      ctx.strokeStyle = wave.color;
+      ctx.beginPath();
+      ctx.arc(wave.position.x, wave.position.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
 
     this.drawChainLinks(ctx);
@@ -847,7 +1047,7 @@ export class Game {
       ctx.translate(orb.position.x, orb.position.y);
       ctx.fillStyle = orb.color;
       ctx.shadowColor = orb.color;
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 18;
       ctx.beginPath();
       ctx.arc(0, 0, orb.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -855,23 +1055,37 @@ export class Game {
     }
 
     for (const particle of this.particles) {
-      if (particle.color.startsWith('#')) {
-        ctx.fillStyle = particle.color;
-        ctx.beginPath();
-        ctx.arc(particle.position.x, particle.position.y, particle.size, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.save();
-        ctx.translate(particle.position.x, particle.position.y);
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.font = `${particle.size}px Rajdhani, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText(particle.color, 0, 0);
-        ctx.restore();
+      ctx.save();
+      ctx.translate(particle.position.x, particle.position.y);
+      ctx.fillStyle = particle.color;
+      ctx.globalAlpha = Math.max(0, Math.min(1, particle.life * 1.4));
+      ctx.beginPath();
+      ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    for (const text of this.floatingTexts) {
+      const ratio = Math.max(0, text.life / text.maxLife);
+      const scale = 1 + text.pop * (1 - ratio);
+      ctx.save();
+      ctx.translate(text.position.x, text.position.y);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = Math.pow(ratio, 0.7);
+      ctx.font = `${text.weight} ${text.size}px Rajdhani, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = text.color;
+      if (text.stroke) {
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = text.stroke;
+        ctx.strokeText(text.value, 0, 0);
       }
+      ctx.fillText(text.value, 0, 0);
+      ctx.restore();
     }
 
     this.drawCannon(ctx);
+    ctx.restore();
   }
 
   private drawChainLinks(ctx: CanvasRenderingContext2D) {
@@ -916,6 +1130,27 @@ export class Game {
       ctx.moveTo(0, y);
       ctx.lineTo(this.width, y);
       ctx.stroke();
+    }
+
+    const comboGlow = clamp(this.comboHeat / 18, 0, 1);
+    if (comboGlow > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.12 + comboGlow * 0.3;
+      const pulse = ctx.createRadialGradient(
+        this.width / 2,
+        this.height - this.bottomSafeZone,
+        this.width * 0.1,
+        this.width / 2,
+        this.height - this.bottomSafeZone,
+        this.width * 0.8,
+      );
+      pulse.addColorStop(0, 'rgba(255, 86, 177, 1)');
+      pulse.addColorStop(0.5, 'rgba(255, 124, 92, 0.6)');
+      pulse.addColorStop(1, 'rgba(255, 86, 177, 0)');
+      ctx.fillStyle = pulse;
+      ctx.fillRect(0, 0, this.width, this.height);
+      ctx.restore();
     }
   }
 
