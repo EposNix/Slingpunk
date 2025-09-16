@@ -20,6 +20,8 @@ export class Orb {
   public damage: number;
   public splitOnImpact: boolean;
   public alive = true;
+  public bounceCount = 0;
+  public pendingWallDamageBonus = 0;
 
   constructor(position: Vector2, velocity: Vector2, options: OrbOptions = {}) {
     this.id = ORB_ID++;
@@ -38,6 +40,8 @@ export class Orb {
       damage: this.damage,
       splitOnImpact: false, // Split orbs lose the ability to split further
     });
+    copy.bounceCount = this.bounceCount;
+    copy.pendingWallDamageBonus = this.pendingWallDamageBonus;
     return copy;
   }
 
@@ -98,6 +102,6 @@ export class Orb {
   }
 
   private onWallBounce(game: Game) {
-    game.emitWallHit(this.position);
+    game.emitWallHit(this.position, this);
   }
 }

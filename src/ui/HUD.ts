@@ -1,8 +1,8 @@
 import type { HudData, RunModifierId } from '../game/types';
-import { ALL_MODIFIERS } from '../game/modifiers';
+import { ALL_DRAFT_MODIFIERS } from '../game/modifiers';
 
 const modifierLabels: Record<RunModifierId, string> = Object.fromEntries(
-  ALL_MODIFIERS.map((mod) => [mod.id, mod.name]),
+  ALL_DRAFT_MODIFIERS.map((mod) => [mod.id, mod.name]),
 ) as Record<RunModifierId, string>;
 
 export class HUD {

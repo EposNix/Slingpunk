@@ -1,10 +1,11 @@
-import type { RunModifierDefinition } from '../game/types';
+import type { DraftModifier } from '../game/modifiers';
 
 export class PowerDraftOverlay {
   public readonly element: HTMLDivElement;
   private readonly optionsGrid: HTMLDivElement;
   private readonly title: HTMLHeadingElement;
-  private resolve?: (choice: RunModifierDefinition) => void;
+  private readonly subtitle: HTMLParagraphElement;
+  private resolve?: (choice: DraftModifier) => void;
   private active = false;
 
   constructor() {
@@ -14,24 +15,30 @@ export class PowerDraftOverlay {
     this.title = document.createElement('h2');
     this.title.textContent = 'Choose your upgrade';
 
-    const subtitle = document.createElement('p');
-    subtitle.textContent = 'Select one of the three experimental puck mods.';
+    this.subtitle = document.createElement('p');
+    this.subtitle.textContent = 'Select one of the three experimental puck mods.';
 
     this.optionsGrid = document.createElement('div');
     this.optionsGrid.className = 'power-draft__grid';
 
-    this.element.append(this.title, subtitle, this.optionsGrid);
+    this.element.append(this.title, this.subtitle, this.optionsGrid);
     this.hide();
   }
 
-  async present(options: RunModifierDefinition[]): Promise<RunModifierDefinition> {
+  async present(
+    options: DraftModifier[],
+    config?: { title?: string; subtitle?: string },
+  ): Promise<DraftModifier> {
     if (this.active) {
       throw new Error('Power draft already active');
     }
     this.active = true;
     this.optionsGrid.replaceChildren();
+    this.title.textContent = config?.title ?? 'Choose your upgrade';
+    this.subtitle.textContent =
+      config?.subtitle ?? 'Select one of the three experimental puck mods.';
 
-    return new Promise<RunModifierDefinition>((resolve) => {
+    return new Promise<DraftModifier>((resolve) => {
       this.resolve = resolve;
       for (const option of options) {
         this.optionsGrid.appendChild(this.createOptionCard(option));
@@ -50,7 +57,7 @@ export class PowerDraftOverlay {
     this.element.style.pointerEvents = 'auto';
   }
 
-  private createOptionCard(option: RunModifierDefinition) {
+  private createOptionCard(option: DraftModifier) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = `draft-card rarity-${option.rarity}`;
@@ -71,7 +78,7 @@ export class PowerDraftOverlay {
     return button;
   }
 
-  private finish(option: RunModifierDefinition) {
+  private finish(option: DraftModifier) {
     if (!this.active) return;
     this.active = false;
     this.hide();

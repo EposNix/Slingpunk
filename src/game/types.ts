@@ -14,7 +14,14 @@ export type RunModifierId =
   | 'volatileCore'
   | 'fractalSplinters'
   | 'stormLattice'
-  | 'triVolley';
+  | 'triVolley'
+  | 'damageBoost'
+  | 'comboHeatDamageBoost'
+  | 'bounceDamageBoost'
+  | 'bossDamageBoost'
+  | 'wallHitDamageBoost'
+  | 'restoreHeart'
+  | 'seekerHomingBoost';
 
 export interface ModifierState {
   orbSizeMultiplier: number;
@@ -26,6 +33,11 @@ export interface ModifierState {
   splitOnImpact: boolean;
   chainLightning?: { range: number; damage: number; interval: number; cooldown: number };
   tripleLaunch: boolean;
+  damageMultiplier: number;
+  comboHeatDamagePercent: number;
+  bounceDamagePercent: number;
+  bossDamageMultiplier: number;
+  wallHitDamageBonusPercent: number;
   lastPicked?: RunModifierId;
 }
 
