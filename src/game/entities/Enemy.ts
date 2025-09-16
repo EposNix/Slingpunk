@@ -111,9 +111,12 @@ export abstract class Enemy {
     if (!this.alive) return;
 
     let remaining = amount;
+    let shieldAbsorbed = 0;
     if (this.shield > 0) {
+      const shieldBefore = this.shield;
       this.shield -= remaining;
       game.emitShieldHit(this.position);
+      shieldAbsorbed = Math.min(shieldBefore, remaining);
       if (this.shield <= 0) {
         remaining = -this.shield;
         this.shield = 0;
@@ -122,13 +125,22 @@ export abstract class Enemy {
       }
     }
 
+    if (shieldAbsorbed > 0) {
+      game.emitDamageNumber(this.position, shieldAbsorbed, { shield: true });
+    }
+
     if (remaining > 0) {
+      const before = this.hp;
       this.hp -= remaining;
-      this.onDamaged(game, remaining, orb);
+      const dealt = Math.min(before, remaining);
+      this.onDamaged(game, dealt, orb);
       if (this.hp <= 0) {
         this.alive = false;
         this.onDeath(game, orb);
         game.onEnemyKilled(this, orb);
+      }
+      if (dealt > 0) {
+        game.emitDamageNumber(this.position, dealt, { critical: !this.alive });
       }
     }
   }
