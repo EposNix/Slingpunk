@@ -64,7 +64,7 @@ export class SplitterGloob extends Enemy {
       game.spawnEnemy('Splitterling', {
         position: spawnPos,
         hp: 1,
-        speed: this.baseSpeed * 1.2,
+        speed: game.baseEnemySpeed * 1.2,
       });
     }
   }
