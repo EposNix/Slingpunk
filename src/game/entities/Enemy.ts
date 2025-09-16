@@ -18,6 +18,8 @@ export abstract class Enemy {
   public maxHp: number;
   public shield = 0;
   public alive = true;
+  public isElite = false;
+  public isBoss = false;
   protected elapsed = 0;
   protected baseSpeed: number;
   private slowTimer = 0;

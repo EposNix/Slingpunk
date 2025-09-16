@@ -1,5 +1,15 @@
 import type { ModifierState, RunModifierDefinition } from './types';
 
+export interface DraftContext {
+  lives: number;
+  maxLives: number;
+}
+
+export type DraftModifier = RunModifierDefinition & {
+  unique?: boolean;
+  available?(state: ModifierState, context: DraftContext): boolean;
+};
+
 const ensureSlow = (state: ModifierState, duration: number, factor: number) => {
   const existing = state.slowEffect;
   if (!existing) {
@@ -38,7 +48,7 @@ const ensureChain = (state: ModifierState, range: number, damage: number, interv
   };
 };
 
-export const ALL_MODIFIERS: RunModifierDefinition[] = [
+export const MAJOR_MODIFIERS: DraftModifier[] = [
   {
     id: 'bulwarkCore',
     name: 'Bulwark Core',
@@ -123,4 +133,80 @@ export const ALL_MODIFIERS: RunModifierDefinition[] = [
   },
 ];
 
-export const MODIFIER_MAP = new Map(ALL_MODIFIERS.map((modifier) => [modifier.id, modifier]));
+export const UPGRADE_MODIFIERS: DraftModifier[] = [
+  {
+    id: 'damageBoost',
+    name: 'Damage Amplifier',
+    description: '+5% damage.',
+    rarity: 'common',
+    apply(state) {
+      state.damageMultiplier += 0.05;
+    },
+  },
+  {
+    id: 'comboHeatDamageBoost',
+    name: 'Combo Flux',
+    description: '+0.4% damage per Combo Heat.',
+    rarity: 'common',
+    apply(state) {
+      state.comboHeatDamagePercent += 0.004;
+    },
+  },
+  {
+    id: 'bounceDamageBoost',
+    name: 'Ricochet Matrix',
+    description: '+5% damage per wall bounce.',
+    rarity: 'common',
+    apply(state) {
+      state.bounceDamagePercent += 0.05;
+    },
+  },
+  {
+    id: 'bossDamageBoost',
+    name: 'Predator Lock',
+    description: '+10% damage vs bosses & elites.',
+    rarity: 'uncommon',
+    apply(state) {
+      state.bossDamageMultiplier += 0.1;
+    },
+  },
+  {
+    id: 'wallHitDamageBoost',
+    name: 'Impact Condenser',
+    description: '+15% damage after a wall hit (next hit).',
+    rarity: 'uncommon',
+    apply(state) {
+      state.wallHitDamageBonusPercent += 0.15;
+    },
+  },
+  {
+    id: 'restoreHeart',
+    name: 'Restore Heart',
+    description: 'Recover one lost heart.',
+    rarity: 'common',
+    apply(_state) {},
+    available(_state, context) {
+      return context.lives < context.maxLives;
+    },
+  },
+  {
+    id: 'seekerHomingBoost',
+    name: 'Seeker Calibration',
+    description: '+15% homing strength if Seeker Fletching is equipped.',
+    rarity: 'uncommon',
+    apply(state) {
+      if (state.homingStrength > 0) {
+        state.homingStrength *= 1.15;
+      }
+    },
+    available(state) {
+      return state.homingStrength > 0;
+    },
+  },
+];
+
+export const ALL_DRAFT_MODIFIERS: DraftModifier[] = [...MAJOR_MODIFIERS, ...UPGRADE_MODIFIERS];
+
+export const MODIFIER_MAP = new Map(
+  ALL_DRAFT_MODIFIERS.map((modifier) => [modifier.id, modifier]),
+);

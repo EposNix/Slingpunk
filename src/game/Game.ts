@@ -1,14 +1,6 @@
 import { HUD } from '../ui/HUD';
 import { PowerDraftOverlay } from '../ui/PowerDraftOverlay';
-import type {
-  EnemyKind,
-  HudData,
-  ModifierRarity,
-  ModifierState,
-  RunModifierDefinition,
-  RunModifierId,
-  Vector2,
-} from './types';
+import type { EnemyKind, HudData, ModifierRarity, ModifierState, Vector2 } from './types';
 import { add, clamp, distanceSq, distanceToSegmentSq, length, normalize, scale, subtract } from './utils';
 import { Orb } from './entities/Orb';
 import type { Enemy } from './entities/Enemy';
@@ -21,7 +13,7 @@ import {
   SporePuff,
 } from './entities/EnemyTypes';
 import { WaveManager } from './waves/WaveManager';
-import { ALL_MODIFIERS } from './modifiers';
+import { MAJOR_MODIFIERS, UPGRADE_MODIFIERS, type DraftModifier } from './modifiers';
 
 interface PointerState {
   dragging: boolean;
@@ -80,14 +72,16 @@ export class Game {
   private comboHeat = 0;
   private comboTimer = 0;
   private focus = 70;
-  private lives = 3;
+  private readonly maxLives = 3;
+  private lives: number;
   private waveId = 'S1-W1';
 
   private readonly waveManager: WaveManager;
-  private availableModifiers: RunModifierDefinition[];
+  private availableMajorModifiers: DraftModifier[];
   public modifiers: ModifierState;
   private drafting = false;
   private pauseLocked = false;
+  private completedWaves = 0;
 
   constructor(canvas: HTMLCanvasElement, hud: HUD, draft: PowerDraftOverlay) {
     this.canvas = canvas;
@@ -102,8 +96,9 @@ export class Game {
     this.cannonPosition = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
 
     this.waveManager = new WaveManager(this);
-    this.availableModifiers = [...ALL_MODIFIERS];
+    this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
+    this.lives = this.maxLives;
 
     this.registerEvents();
     this.onResize();
@@ -139,43 +134,61 @@ export class Game {
     this.hud.showToast('Perfect Wave! +500');
     this.score += 500;
     this.focus = clamp(this.focus + 15, 0, 100);
+    this.completedWaves += 1;
     this.updateHud();
     void this.beginModifierDraft();
   }
 
   private async beginModifierDraft() {
-    if (this.drafting || this.availableModifiers.length === 0 || this.lives <= 0) {
+    if (this.drafting || this.lives <= 0) {
       return;
     }
     this.drafting = true;
     this.pauseLocked = true;
     this.paused = true;
     this.hud.setPaused(true);
-    const options = this.pickDraftOptions();
-    if (options.length === 0) {
-      this.drafting = false;
-      this.pauseLocked = false;
-      this.paused = false;
-      this.hud.setPaused(false);
-      return;
+
+    const upgradeOptions = this.pickUpgradeOptions();
+    if (upgradeOptions.length > 0) {
+      const choice = await this.draft.present(upgradeOptions, {
+        title: 'Choose your enhancement',
+        subtitle: 'Stack tuning upgrades or restore a heart between waves.',
+      });
+      this.applyModifier(choice);
     }
-    const choice = await this.draft.present(options);
-    this.applyModifier(choice);
-    this.availableModifiers = this.availableModifiers.filter((mod) => mod.id !== choice.id);
+
+    const shouldOfferMajor =
+      this.availableMajorModifiers.length > 0 && this.completedWaves % 3 === 0;
+    if (shouldOfferMajor) {
+      const majorOptions = this.pickMajorOptions();
+      if (majorOptions.length > 0) {
+        const choice = await this.draft.present(majorOptions, {
+          title: 'Choose a core modifier',
+          subtitle: 'Select one of the experimental puck mods.',
+        });
+        this.applyModifier(choice);
+        this.availableMajorModifiers = this.availableMajorModifiers.filter(
+          (mod) => mod.id !== choice.id,
+        );
+      }
+    }
+
     this.drafting = false;
     this.pauseLocked = false;
     this.paused = false;
     this.hud.setPaused(false);
     this.lastTime = performance.now();
-    this.hud.showToast(`${choice.name} equipped!`, 1600);
   }
 
-  private pickDraftOptions(): RunModifierDefinition[] {
-    if (this.availableModifiers.length <= 3) {
-      return [...this.availableModifiers];
+  private pickMajorOptions(): DraftModifier[] {
+    if (this.availableMajorModifiers.length === 0) {
+      return [];
     }
-    const pool = [...this.availableModifiers];
-    const selections: RunModifierDefinition[] = [];
+    if (this.availableMajorModifiers.length <= 3) {
+      return [...this.availableMajorModifiers];
+    }
+    const pool = [...this.availableMajorModifiers];
+    const selections: DraftModifier[] = [];
     const fallback: Record<ModifierRarity, ModifierRarity[]> = {
       common: ['common', 'uncommon', 'rare'],
       uncommon: ['uncommon', 'rare', 'common'],
@@ -184,7 +197,7 @@ export class Game {
     for (let i = 0; i < 3; i++) {
       if (!pool.length) break;
       const desired = this.rollRarity();
-      let candidates: RunModifierDefinition[] = [];
+      let candidates: DraftModifier[] = [];
       for (const bucket of fallback[desired]) {
         candidates = pool.filter((mod) => mod.rarity === bucket);
         if (candidates.length) break;
@@ -199,6 +212,25 @@ export class Game {
     return selections;
   }
 
+  private pickUpgradeOptions(): DraftModifier[] {
+    const context = { lives: this.lives, maxLives: this.maxLives };
+    const available = UPGRADE_MODIFIERS.filter(
+      (modifier) => !modifier.available || modifier.available(this.modifiers, context),
+    );
+    if (available.length <= 3) {
+      return [...available];
+    }
+    const pool = [...available];
+    const selections: DraftModifier[] = [];
+    for (let i = 0; i < 3; i++) {
+      if (!pool.length) break;
+      const pickIndex = Math.floor(Math.random() * pool.length);
+      selections.push(pool[pickIndex]);
+      pool.splice(pickIndex, 1);
+    }
+    return selections;
+  }
+
   private rollRarity(): ModifierRarity {
     const roll = Math.random();
     if (roll < 0.6) return 'common';
@@ -206,7 +238,16 @@ export class Game {
     return 'rare';
   }
 
-  private applyModifier(definition: RunModifierDefinition) {
+  private applyModifier(definition: DraftModifier) {
+    if (definition.id === 'restoreHeart') {
+      if (this.lives < this.maxLives) {
+        this.lives = Math.min(this.maxLives, this.lives + 1);
+        this.modifiers.lastPicked = definition.id;
+        this.updateHud();
+        this.hud.showToast('Heart restored!', 1600);
+      }
+      return;
+    }
     const previousSize = this.modifiers.orbSizeMultiplier;
     definition.apply(this.modifiers);
     this.modifiers.lastPicked = definition.id;
@@ -229,6 +270,7 @@ export class Game {
     }
 
     this.updateHud();
+    this.hud.showToast(`${definition.name} equipped!`, 1600);
   }
 
   onEnemyKilled(enemy: Enemy, orb: Orb) {
@@ -245,7 +287,7 @@ export class Game {
   }
 
   onEnemyBreach(_enemy: Enemy) {
-    this.lives -= 1;
+    this.lives = Math.max(0, this.lives - 1);
     this.comboHeat = 0;
     this.hud.showToast('Breach! -1 Heart');
     if (this.lives <= 0) {
@@ -260,7 +302,13 @@ export class Game {
     }
   }
 
-  emitWallHit(position: Vector2) {
+  emitWallHit(position: Vector2, orb?: Orb) {
+    if (orb) {
+      orb.bounceCount += 1;
+      if (this.modifiers.wallHitDamageBonusPercent > 0) {
+        orb.pendingWallDamageBonus = this.modifiers.wallHitDamageBonusPercent;
+      }
+    }
     this.spawnParticles(position, '#39d6ff', 5, 40, 120);
   }
 
@@ -469,7 +517,7 @@ export class Game {
 
   private resolveOrbHit(orb: Orb, enemy: Enemy) {
     const impactPoint = { ...enemy.position };
-    const damage = this.computeOrbDamage(orb);
+    const damage = this.computeOrbDamage(orb, enemy);
     enemy.takeDamage(damage, this, orb);
     this.spawnParticles(impactPoint, orb.color, 12, 40, 140);
 
@@ -546,10 +594,34 @@ export class Game {
     }
   }
 
-  private computeOrbDamage(orb: Orb) {
-    const base = orb.damage;
+  private computeOrbDamage(orb: Orb, enemy: Enemy) {
+    let damage = orb.damage * this.modifiers.damageMultiplier;
+
+    if (this.modifiers.comboHeatDamagePercent > 0) {
+      const comboMultiplier =
+        1 + Math.max(0, this.comboHeat) * this.modifiers.comboHeatDamagePercent;
+      damage *= comboMultiplier;
+    }
+
+    if (this.modifiers.bounceDamagePercent > 0 && orb.bounceCount > 0) {
+      damage *= 1 + orb.bounceCount * this.modifiers.bounceDamagePercent;
+    }
+
+    if (this.isBossOrElite(enemy) && this.modifiers.bossDamageMultiplier > 1) {
+      damage *= this.modifiers.bossDamageMultiplier;
+    }
+
+    if (orb.pendingWallDamageBonus > 0) {
+      damage *= 1 + orb.pendingWallDamageBonus;
+      orb.pendingWallDamageBonus = 0;
+    }
+
     const tier = Math.floor(this.comboHeat / 5);
-    return base + tier * this.modifiers.comboDamagePerTier;
+    return damage + tier * this.modifiers.comboDamagePerTier;
+  }
+
+  private isBossOrElite(enemy: Enemy) {
+    return enemy.isBoss || enemy.isElite;
   }
 
   private spawnParticles(position: Vector2, color: string, count: number, speed: number, radius: number) {
@@ -616,6 +688,11 @@ export class Game {
       homingStrength: 0,
       splitOnImpact: false,
       tripleLaunch: false,
+      damageMultiplier: 1,
+      comboHeatDamagePercent: 0,
+      bounceDamagePercent: 0,
+      bossDamageMultiplier: 1,
+      wallHitDamageBonusPercent: 0,
     };
   }
 
@@ -624,15 +701,16 @@ export class Game {
     this.comboHeat = 0;
     this.comboTimer = 0;
     this.focus = 70;
-    this.lives = 3;
+    this.lives = this.maxLives;
     this.waveId = 'S1-W1';
     this.orbs = [];
     this.enemies = [];
     this.particles = [];
-    this.availableModifiers = [...ALL_MODIFIERS];
+    this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
     this.drafting = false;
     this.pauseLocked = false;
+    this.completedWaves = 0;
     this.draft.hide();
     this.waveManager.reset();
     this.updateHud();
