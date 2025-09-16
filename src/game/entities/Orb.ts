@@ -36,7 +36,7 @@ export class Orb {
       color: this.color,
       radius: this.radius,
       damage: this.damage,
-      splitOnImpact: this.splitOnImpact,
+      splitOnImpact: false, // Split orbs lose the ability to split further
     });
     return copy;
   }
