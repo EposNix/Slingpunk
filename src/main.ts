@@ -1,6 +1,7 @@
 import './style.css';
 import { Game } from './game/Game';
 import { HUD } from './ui/HUD';
+import { PauseOverlay } from './ui/PauseOverlay';
 import { PowerDraftOverlay } from './ui/PowerDraftOverlay';
 
 declare global {
@@ -25,11 +26,12 @@ function bootstrap() {
 
   const hud = new HUD();
   const draft = new PowerDraftOverlay();
+  const pauseOverlay = new PauseOverlay();
 
-  shell.append(canvas, hud.element, hud.toastElement, draft.element);
+  shell.append(canvas, hud.element, hud.toastElement, pauseOverlay.element, draft.element);
   app.appendChild(shell);
 
-  const game = new Game(canvas, hud, draft);
+  const game = new Game(canvas, hud, draft, pauseOverlay);
   window.slingpunkGame = game;
 
   hud.onPauseRequested(() => {

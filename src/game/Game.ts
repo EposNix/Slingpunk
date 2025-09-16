@@ -1,4 +1,5 @@
 import { HUD } from '../ui/HUD';
+import { PauseOverlay, type PauseOverlayPlayerModifier } from '../ui/PauseOverlay';
 import { PowerDraftOverlay } from '../ui/PowerDraftOverlay';
 import type {
   EnemyKind,
@@ -6,6 +7,7 @@ import type {
   HudData,
   ModifierRarity,
   ModifierState,
+  RunModifierId,
   Vector2,
   WaveStartAnnouncement,
 } from './types';
@@ -48,6 +50,7 @@ export class Game {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly hud: HUD;
   private readonly draft: PowerDraftOverlay;
+  private readonly pauseOverlay: PauseOverlay;
 
   public width: number;
   public height: number;
@@ -91,14 +94,21 @@ export class Game {
   private pauseLocked = false;
   private completedWaves = 0;
   private enemyScaling: EnemyWaveScaling;
+  private playerModifierCounts = new Map<RunModifierId, number>();
 
-  constructor(canvas: HTMLCanvasElement, hud: HUD, draft: PowerDraftOverlay) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    hud: HUD,
+    draft: PowerDraftOverlay,
+    pauseOverlay: PauseOverlay,
+  ) {
     this.canvas = canvas;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvas context failed to initialize');
     this.ctx = context;
     this.hud = hud;
     this.draft = draft;
+    this.pauseOverlay = pauseOverlay;
 
     this.width = canvas.width;
     this.height = canvas.height;
@@ -110,9 +120,17 @@ export class Game {
     this.lives = this.maxLives;
     this.enemyScaling = this.createDefaultEnemyScaling();
 
+    this.pauseOverlay.onResumeRequested(() => {
+      if (this.paused && !this.pauseLocked) {
+        this.togglePause();
+      }
+    });
+
     this.registerEvents();
     this.onResize();
     this.updateHud();
+    this.syncPlayerModifiersOverlay();
+    this.pauseOverlay.setEnemyModifiers([]);
   }
 
   start() {
@@ -126,6 +144,8 @@ export class Game {
     if (this.pauseLocked) return;
     this.paused = !this.paused;
     this.hud.setPaused(this.paused);
+    this.syncPlayerModifiersOverlay();
+    this.pauseOverlay.setVisible(this.paused);
     if (!this.paused) {
       this.lastTime = performance.now();
     }
@@ -167,6 +187,7 @@ export class Game {
 
     const duration = 2200 + info.modifiers.length * 350;
     this.hud.showToast(messageParts.join(' · '), duration);
+    this.pauseOverlay.setEnemyModifiers(info.modifiers);
     this.updateHud();
   }
 
@@ -291,6 +312,8 @@ export class Game {
     const previousSize = this.modifiers.orbSizeMultiplier;
     definition.apply(this.modifiers);
     this.modifiers.lastPicked = definition.id;
+    const previousCount = this.playerModifierCounts.get(definition.id) ?? 0;
+    this.playerModifierCounts.set(definition.id, previousCount + 1);
 
     if (this.modifiers.orbSizeMultiplier !== previousSize && previousSize > 0) {
       const ratio = this.modifiers.orbSizeMultiplier / previousSize;
@@ -309,6 +332,7 @@ export class Game {
       this.modifiers.chainLightning.cooldown = 0;
     }
 
+    this.syncPlayerModifiersOverlay();
     this.updateHud();
     this.hud.showToast(`${definition.name} equipped!`, 1600);
   }
@@ -766,13 +790,25 @@ export class Game {
     this.particles = [];
     this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
+    this.playerModifierCounts.clear();
     this.drafting = false;
     this.pauseLocked = false;
     this.completedWaves = 0;
     this.enemyScaling = this.createDefaultEnemyScaling();
+    this.pauseOverlay.setVisible(false);
+    this.syncPlayerModifiersOverlay();
+    this.pauseOverlay.setEnemyModifiers([]);
     this.draft.hide();
     this.waveManager.reset();
     this.updateHud();
+  }
+
+  private syncPlayerModifiersOverlay() {
+    const modifiers: PauseOverlayPlayerModifier[] = [];
+    for (const [id, count] of this.playerModifierCounts) {
+      modifiers.push({ id, count });
+    }
+    this.pauseOverlay.setPlayerModifiers(modifiers);
   }
 
   private updateHud() {
