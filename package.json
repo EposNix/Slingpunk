@@ -1,0 +1,23 @@
+{
+  "name": "slingpunk",
+  "version": "0.1.0",
+  "description": "HTML prototype of Slingpunk arcade slingshot roguelite.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "game",
+    "prototype",
+    "slingpunk"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.5.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5"
+  }
+}
