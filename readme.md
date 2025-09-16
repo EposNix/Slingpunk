@@ -18,9 +18,9 @@ A one-finger, slingshot-style arcade blaster where you launch energized orbs fro
 
 1. **Aim & Flick:** Pull back the energy orb in the bottom slingshot cannon. Preview shows a short dotted arc (spin can curve mid-flight).
 2. **Ricochet & Chain:** Orb bounces through descending enemies and environment bumpers, building **Combo Heat** and **Overcharge**.
-3. **Collect & Trigger:** Hit floating power-up icons to instantly mutate the shot (multiball, lightning, shield, etc.).
+3. **Draft a Mod:** After every wave, time freezes and you pick 1 of 3 puck mutations (weighted common/uncommon/rare) to permanently slot into the run.
 4. **Manage Pressure:** Enemies descend in waves; survive the timer or wipe the wave to score **Perfect Clears**.
-5. **Upgrade Between Waves:** Spend collected Shards to upgrade cannon mods, orb types, and passive perks.
+5. **Stack Synergy:** Drafted mods persist and compound, so each run snowballs into a different physics toybox.
 6. **Boss Arrives:** Skill-check time, physics puzzle elements, and unique weak points.
 7. **Cash Out or Push:** In roguelite modes, choose to bank rewards or gamble on the next meaner arena.
 
@@ -29,7 +29,6 @@ A one-finger, slingshot-style arcade blaster where you launch energized orbs fro
 * **Drag to aim, release to fire.**
 * **Hold to charge** (piercing & +speed).
 * **Aftertouch spin:** While the orb is airborne, swipe left/right to add slight curve (consumes **Focus** meter; recharges on hits).
-* **Tap on floating power-ups** to “pull” them into the current orb if within magnet radius.
 
 # moment-to-moment juice
 
@@ -67,15 +66,25 @@ A one-finger, slingshot-style arcade blaster where you launch energized orbs fro
 * **Archivist-9000:** Laser sweep telegraphs; disable joints to drop the core.
   Boss fights add environmental toys: **gravity wells**, **directional fans**, **one-time-use amplifiers**.
 
-# power-ups (on-map collectibles)
+# puck mods (wave drafts)
 
-* **Lightning Bolt:** Chains to up to 6 targets; +25% chain length per active combo tier.
-* **Shield Bubble:** Orb ignores first collision loss, keeps speed; also body-blocks an enemy for 1s.
-* **Multiball:** Splits into 3 child orbs at next collision (each at 70% damage).
-* **Time Warp:** 2s slowed enemies; orb speed unaffected.
-* **Ricochet Rune:** Next 4 bounces gain +20% damage and +10% angle variance (chaos = fun).
-* **Pierce Core:** First 2 enemies are pierced; destroys shields.
-* **Supernova Seed:** On-hit explosion; bigger if your combo ≥ x15.
+## Common (foundational tweaks)
+
+* **Bulwark Core:** Orb radius grows by 25% for the rest of the run.
+* **Cryo Coating:** Hits inflict a brief slow on enemies, buying precious airtime.
+* **Combo Drive:** Bonus damage scales with combo tier (+0.5 per tier).
+
+## Uncommon (skill amplifiers)
+
+* **Repulsor Burst:** Impacts launch enemies upward, resetting board pressure.
+* **Seeker Fletching:** Orbs subtly steer toward the nearest target mid-flight.
+* **Volatile Core:** Collisions detonate in a small AOE blast.
+
+## Rare (run-defining chaos)
+
+* **Fractal Splinters:** Every enemy hit splits the orb into twin projectiles.
+* **Storm Lattice:** Active orbs link with arcing electricity that scorches nearby foes.
+* **Tri-Volley:** Launching fires a three-orb spread every time.
 
 # player progression (roguelite meets campaign)
 
@@ -120,7 +129,7 @@ A one-finger, slingshot-style arcade blaster where you launch energized orbs fro
   * Top-left: Score & Combo Heat meter (wraps, glows at thresholds).
   * Top-right: Hearts + Pause.
   * Bottom center: Cannon + aim guide; Focus bar above cannon.
-  * Bottom-left: Current power-up slot (tap to trigger if banked).
+  * Bottom-left: Last drafted mod display (shows rarity + name, long-press for details).
   * Bottom-right: Run upgrades quick view (tiny icons; long-press for details).
 * **Accessibility:** Colorblind-friendly enemy shapes; haptic slider; aim-guide strength options; one-handed left/right flip.
 
@@ -135,9 +144,10 @@ A one-finger, slingshot-style arcade blaster where you launch energized orbs fro
 **Shot physics:** arcade-tuned; fixed timestep; small angle randomness (+/–3°) for variety.
 **Spin (aftertouch):** adds lateral acceleration up to 6° of curvature over 0.8s; drains Focus 20/s, gain +5 per hit.
 **Hitboxes:** capsule for orb, convex polys for enemies; shield is separate collider with 0.75x knockback.
-**Drop tables:**
+**Draft odds:**
 
-* Power-up icon chance per enemy: 8% base; +2% if elite; pity counter guarantees one every 10 kills.
+* Three-card offer each wave: base weights 60% common / 30% uncommon / 10% rare (falls back if a tier is empty).
+* Selected mods leave the pool so duplicates only appear when intentionally stacked.
 
 # sample wave recipe (Stage 2-3)
 
@@ -170,13 +180,13 @@ Weekly mutators keep it spicy:
 
 * **Mirror World:** left/right reflections on all bounces.
 * **Heavier Than Vibes:** +30% gravity, bigger combos score more.
-* **Shock Swap:** power-ups reroll themselves every 5s mid-air.
+* **Draft Swap:** post-wave draft offers reroll once for free.
 
 # content pipeline notes
 
 * **Enemy kit first** (Zigzag, Splitter, Shieldy, Magnetron, Reflector, Spore).
 * **Two bosses** for soft launch (Disk Jockey, Mother Gloob).
-* **10 run perks** + **6 power-ups** minimum for variety.
+* **Run mods:** 3 common, 3 uncommon, 3 rare at minimum for variety.
 * **3 orb archetypes** at launch (Piercer, Bouncer, Exploder).
 * **Cosmetics:** 6 cannon skins, 6 trails, 3 victory banners.
 
@@ -192,7 +202,7 @@ Weekly mutators keep it spicy:
 
 1. **Aim & Flick** (guided) → pop 3 Gloobs.
 2. Introduce **Spin** with Magnetron target.
-3. **Power-up** tutorial: grab Multiball mid-flight → instant dopamine.
+3. **Draft** tutorial: clear first wave → choose one of three mod cards.
 4. Mini-boss with one weak spot → slow-mo finish → “You’re arena-ready!”
 
 # minimal JSON for a wave (example)
@@ -219,7 +229,7 @@ Weekly mutators keep it spicy:
 * **Midground:** a rain of caricatured enemies—round aliens with goofy grins, shiny robots with magnet eyes, jelly floaters with halos.
 * **Pickups:** Lightning, Shield, Multiball glyphs—floating, emissive, with subtle orbiters.
 * **Backdrop:** neon arena bleachers & cyber billboards; starfield parallax; subtle fog cones.
-* **Lighting:** high-contrast rim lights, bloom on hits; vignette on high combo; UI faint but readable (score, hearts, power-up slot).
+* **Lighting:** high-contrast rim lights, bloom on hits; vignette on high combo; UI faint but readable (score, hearts, mod tracker).
 * **Color:** bold neons against deep navy/purple; accent sparks of citrus orange.
 
 # “this will actually ship” checklist

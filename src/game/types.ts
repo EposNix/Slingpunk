@@ -3,13 +3,39 @@ export interface Vector2 {
   y: number;
 }
 
-export type PowerUpType =
-  | 'lightning'
-  | 'shield'
-  | 'multiball'
-  | 'timewarp'
-  | 'ricochet'
-  | 'pierce';
+export type ModifierRarity = 'common' | 'uncommon' | 'rare';
+
+export type RunModifierId =
+  | 'bulwarkCore'
+  | 'cryoCoating'
+  | 'comboDrive'
+  | 'repulsorBurst'
+  | 'seekerFletching'
+  | 'volatileCore'
+  | 'fractalSplinters'
+  | 'stormLattice'
+  | 'triVolley';
+
+export interface ModifierState {
+  orbSizeMultiplier: number;
+  slowEffect?: { duration: number; factor: number };
+  comboDamagePerTier: number;
+  knockbackForce: number;
+  homingStrength: number;
+  explosion?: { radius: number; damage: number };
+  splitOnImpact: boolean;
+  chainLightning?: { range: number; damage: number; interval: number; cooldown: number };
+  tripleLaunch: boolean;
+  lastPicked?: RunModifierId;
+}
+
+export interface RunModifierDefinition {
+  id: RunModifierId;
+  name: string;
+  description: string;
+  rarity: ModifierRarity;
+  apply(state: ModifierState): void;
+}
 
 export interface HudData {
   score: number;
@@ -19,7 +45,7 @@ export interface HudData {
   focus: number;
   lives: number;
   wave: number;
-  powerUp?: PowerUpType;
+  lastModifier?: RunModifierId;
 }
 
 export type EnemyKind =
@@ -43,5 +69,4 @@ export interface WaveBlueprint {
   spawnSeconds: number;
   enemies: WaveEnemyConfig[];
   bumpers?: Array<{ shape: 'triangle'; x: number; y: number }>;
-  powerupDropChance: number;
 }

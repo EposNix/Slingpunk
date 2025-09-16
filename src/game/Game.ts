@@ -1,6 +1,15 @@
 import { HUD } from '../ui/HUD';
-import type { EnemyKind, HudData, PowerUpType, Vector2 } from './types';
-import { add, clamp, distanceSq, length, normalize, randomChoice, scale, subtract } from './utils';
+import { PowerDraftOverlay } from '../ui/PowerDraftOverlay';
+import type {
+  EnemyKind,
+  HudData,
+  ModifierRarity,
+  ModifierState,
+  RunModifierDefinition,
+  RunModifierId,
+  Vector2,
+} from './types';
+import { add, clamp, distanceSq, distanceToSegmentSq, length, normalize, scale, subtract } from './utils';
 import { Orb } from './entities/Orb';
 import type { Enemy } from './entities/Enemy';
 import {
@@ -11,8 +20,8 @@ import {
   Splitterling,
   SporePuff,
 } from './entities/EnemyTypes';
-import { PowerUp } from './entities/PowerUp';
 import { WaveManager } from './waves/WaveManager';
+import { ALL_MODIFIERS } from './modifiers';
 
 interface PointerState {
   dragging: boolean;
@@ -34,12 +43,11 @@ interface Particle {
   color: string;
 }
 
-const POWERUP_TYPES: PowerUpType[] = ['lightning', 'shield', 'multiball', 'ricochet', 'pierce', 'timewarp'];
-
 export class Game {
   public readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly hud: HUD;
+  private readonly draft: PowerDraftOverlay;
 
   public width: number;
   public height: number;
@@ -48,7 +56,6 @@ export class Game {
 
   public orbs: Orb[] = [];
   public enemies: Enemy[] = [];
-  public powerUps: PowerUp[] = [];
 
   private particles: Particle[] = [];
   private pointer: PointerState = {
@@ -74,25 +81,29 @@ export class Game {
   private comboTimer = 0;
   private focus = 70;
   private lives = 3;
-  private heldPowerUp: PowerUpType | undefined;
   private waveId = 'S1-W1';
 
   private readonly waveManager: WaveManager;
+  private availableModifiers: RunModifierDefinition[];
+  public modifiers: ModifierState;
+  private drafting = false;
+  private pauseLocked = false;
 
-  private timeWarpTimer = 0;
-
-  constructor(canvas: HTMLCanvasElement, hud: HUD) {
+  constructor(canvas: HTMLCanvasElement, hud: HUD, draft: PowerDraftOverlay) {
     this.canvas = canvas;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvas context failed to initialize');
     this.ctx = context;
     this.hud = hud;
+    this.draft = draft;
 
     this.width = canvas.width;
     this.height = canvas.height;
     this.cannonPosition = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
 
     this.waveManager = new WaveManager(this);
+    this.availableModifiers = [...ALL_MODIFIERS];
+    this.modifiers = this.createInitialModifiers();
 
     this.registerEvents();
     this.onResize();
@@ -107,6 +118,7 @@ export class Game {
   }
 
   togglePause() {
+    if (this.pauseLocked) return;
     this.paused = !this.paused;
     this.hud.setPaused(this.paused);
     if (!this.paused) {
@@ -128,6 +140,95 @@ export class Game {
     this.score += 500;
     this.focus = clamp(this.focus + 15, 0, 100);
     this.updateHud();
+    void this.beginModifierDraft();
+  }
+
+  private async beginModifierDraft() {
+    if (this.drafting || this.availableModifiers.length === 0 || this.lives <= 0) {
+      return;
+    }
+    this.drafting = true;
+    this.pauseLocked = true;
+    this.paused = true;
+    this.hud.setPaused(true);
+    const options = this.pickDraftOptions();
+    if (options.length === 0) {
+      this.drafting = false;
+      this.pauseLocked = false;
+      this.paused = false;
+      this.hud.setPaused(false);
+      return;
+    }
+    const choice = await this.draft.present(options);
+    this.applyModifier(choice);
+    this.availableModifiers = this.availableModifiers.filter((mod) => mod.id !== choice.id);
+    this.drafting = false;
+    this.pauseLocked = false;
+    this.paused = false;
+    this.hud.setPaused(false);
+    this.lastTime = performance.now();
+    this.hud.showToast(`${choice.name} equipped!`, 1600);
+  }
+
+  private pickDraftOptions(): RunModifierDefinition[] {
+    if (this.availableModifiers.length <= 3) {
+      return [...this.availableModifiers];
+    }
+    const pool = [...this.availableModifiers];
+    const selections: RunModifierDefinition[] = [];
+    const fallback: Record<ModifierRarity, ModifierRarity[]> = {
+      common: ['common', 'uncommon', 'rare'],
+      uncommon: ['uncommon', 'rare', 'common'],
+      rare: ['rare', 'uncommon', 'common'],
+    };
+    for (let i = 0; i < 3; i++) {
+      if (!pool.length) break;
+      const desired = this.rollRarity();
+      let candidates: RunModifierDefinition[] = [];
+      for (const bucket of fallback[desired]) {
+        candidates = pool.filter((mod) => mod.rarity === bucket);
+        if (candidates.length) break;
+      }
+      if (!candidates.length) {
+        candidates = pool;
+      }
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      selections.push(pick);
+      pool.splice(pool.indexOf(pick), 1);
+    }
+    return selections;
+  }
+
+  private rollRarity(): ModifierRarity {
+    const roll = Math.random();
+    if (roll < 0.6) return 'common';
+    if (roll < 0.9) return 'uncommon';
+    return 'rare';
+  }
+
+  private applyModifier(definition: RunModifierDefinition) {
+    const previousSize = this.modifiers.orbSizeMultiplier;
+    definition.apply(this.modifiers);
+    this.modifiers.lastPicked = definition.id;
+
+    if (this.modifiers.orbSizeMultiplier !== previousSize && previousSize > 0) {
+      const ratio = this.modifiers.orbSizeMultiplier / previousSize;
+      for (const orb of this.orbs) {
+        orb.radius *= ratio;
+      }
+    }
+
+    if (this.modifiers.splitOnImpact) {
+      for (const orb of this.orbs) {
+        orb.splitOnImpact = true;
+      }
+    }
+
+    if (this.modifiers.chainLightning) {
+      this.modifiers.chainLightning.cooldown = 0;
+    }
+
+    this.updateHud();
   }
 
   onEnemyKilled(enemy: Enemy, orb: Orb) {
@@ -137,11 +238,6 @@ export class Game {
     const delta = Math.round(baseScore * multiplier);
     this.score += delta;
     this.emitScorePop(enemy.position, delta);
-
-    if (this.waveManager.rollDrop(enemy.type)) {
-      const type = randomChoice(POWERUP_TYPES);
-      this.powerUps.push(new PowerUp(type, enemy.position));
-    }
 
     this.comboHeat += 1;
     this.comboTimer = 0;
@@ -305,43 +401,41 @@ export class Game {
   };
 
   private update(dt: number) {
-    const timeScale = this.timeWarpTimer > 0 ? 0.6 : 1;
-    const scaledDt = dt * timeScale;
-    if (this.timeWarpTimer > 0) {
-      this.timeWarpTimer = Math.max(0, this.timeWarpTimer - dt);
-    }
-
-    this.launchCooldown = Math.max(0, this.launchCooldown - scaledDt);
-    this.waveManager.update(scaledDt);
+    this.launchCooldown = Math.max(0, this.launchCooldown - dt);
+    this.waveManager.update(dt);
 
     if (this.aftertouch.active && this.focus > 0) {
-      const force = this.aftertouch.direction * 680 * scaledDt;
+      const force = this.aftertouch.direction * 680 * dt;
       for (const orb of this.orbs) {
         if (!orb.alive) continue;
         orb.velocity.x += force;
       }
-      this.focus = clamp(this.focus - 20 * scaledDt, 0, 100);
+      this.focus = clamp(this.focus - 20 * dt, 0, 100);
     }
 
     for (const orb of this.orbs) {
-      orb.update(scaledDt, this);
+      orb.update(dt, this);
     }
 
     for (const enemy of this.enemies) {
       if (enemy.alive) {
-        enemy.update(scaledDt, this);
+        enemy.update(dt, this);
       }
-    }
-
-    for (const power of this.powerUps) {
-      power.update(scaledDt, this);
     }
 
     this.handleCollisions();
 
+    const chain = this.modifiers.chainLightning;
+    if (chain && this.orbs.filter((o) => o.alive).length > 1) {
+      chain.cooldown -= dt;
+      if (chain.cooldown <= 0) {
+        chain.cooldown = chain.interval;
+        this.tickChainLightning(chain.damage, chain.range);
+      }
+    }
+
     this.orbs = this.orbs.filter((orb) => orb.alive);
     this.enemies = this.enemies.filter((enemy) => enemy.alive);
-    this.powerUps = this.powerUps.filter((power) => power.alive);
 
     this.comboTimer += dt;
     if (this.comboTimer > 2 && this.comboHeat > 0) {
@@ -349,12 +443,8 @@ export class Game {
     }
 
     for (const particle of this.particles) {
-      particle.life -= scaledDt;
-      if (particle.color.startsWith('#')) {
-        particle.position = add(particle.position, scale(particle.velocity, scaledDt));
-      } else {
-        particle.position = add(particle.position, scale(particle.velocity, scaledDt));
-      }
+      particle.life -= dt;
+      particle.position = add(particle.position, scale(particle.velocity, dt));
     }
     this.particles = this.particles.filter((p) => p.life > 0);
 
@@ -369,97 +459,97 @@ export class Game {
         const sum = orb.radius + enemy.radius;
         if (distanceSq(orb.position, enemy.position) <= sum * sum) {
           this.resolveOrbHit(orb, enemy);
-        }
-      }
-
-      for (const power of this.powerUps) {
-        if (!power.alive) continue;
-        const range = orb.radius + power.radius;
-        if (distanceSq(orb.position, power.position) <= range * range) {
-          this.collectPowerUp(power, orb);
+          if (!orb.alive) {
+            break;
+          }
         }
       }
     }
   }
 
   private resolveOrbHit(orb: Orb, enemy: Enemy) {
-    enemy.takeDamage(orb.damage, this, orb);
-    this.spawnParticles(enemy.position, orb.color, 12, 40, 140);
+    const impactPoint = { ...enemy.position };
+    const damage = this.computeOrbDamage(orb);
+    enemy.takeDamage(damage, this, orb);
+    this.spawnParticles(impactPoint, orb.color, 12, 40, 140);
 
-    if (orb.pendingSplit) {
-      orb.pendingSplit = false;
-      this.splitOrb(orb);
-    }
-
-    if (orb.lightningChains > 0) {
-      this.chainLightning(orb, enemy);
-      orb.lightningChains = Math.max(0, orb.lightningChains - 2);
-    }
-
-    if (orb.pierceLeft > 0) {
-      orb.pierceLeft -= 1;
-    } else if (orb.shieldHits > 0) {
-      orb.shieldHits -= 1;
-    } else {
-      const relative = subtract(orb.position, enemy.position);
-      const dir = normalize(relative);
-      const speed = length(orb.velocity) * 0.7 + 320;
-      orb.velocity = scale(dir, speed);
-    }
-  }
-
-  private collectPowerUp(power: PowerUp, orb: Orb) {
-    power.alive = false;
-    if (this.hasActiveOrbs) {
-      orb.applyPowerUp(power.type);
-      if (power.type === 'timewarp') {
-        this.timeWarpTimer = 2;
+    if (enemy.alive) {
+      if (this.modifiers.slowEffect) {
+        enemy.applySlow(this.modifiers.slowEffect.duration, this.modifiers.slowEffect.factor);
       }
-      this.hud.showToast(`${this.formatPowerup(power.type)} ready!`);
-    } else {
-      this.heldPowerUp = power.type;
+      if (this.modifiers.knockbackForce > 0) {
+        enemy.applyKnockback(this.modifiers.knockbackForce);
+      }
     }
+
+    if (this.modifiers.explosion) {
+      this.triggerExplosion(impactPoint, orb);
+    }
+
+    if (orb.splitOnImpact) {
+      this.splitOrb(orb);
+      return;
+    }
+
+    const relative = subtract(orb.position, impactPoint);
+    const dir = normalize(relative);
+    const speed = length(orb.velocity) * 0.7 + 320;
+    orb.velocity = scale(dir, speed);
   }
 
   private splitOrb(orb: Orb) {
     const speed = length(orb.velocity);
-    const baseDir = normalize(orb.velocity);
-    const angle = Math.atan2(baseDir.y, baseDir.x);
-    const spread = 0.3;
-    const velocities = [angle - spread, angle + spread].map((theta) => ({
-      x: Math.cos(theta) * speed,
-      y: Math.sin(theta) * speed,
-    }));
-    for (const vel of velocities) {
+    const angle = Math.atan2(orb.velocity.y, orb.velocity.x);
+    const spread = 0.28;
+    const offsets = [-spread, spread];
+    for (const offset of offsets) {
+      const theta = angle + offset;
+      const vel = { x: Math.cos(theta) * speed, y: Math.sin(theta) * speed };
       const clone = orb.cloneWithVelocity(vel);
-      clone.pendingSplit = false;
       this.orbs.push(clone);
+    }
+    orb.alive = false;
+  }
+
+  private triggerExplosion(center: Vector2, source: Orb) {
+    const explosion = this.modifiers.explosion;
+    if (!explosion) return;
+    this.spawnParticles(center, '#ff9a61', 18, 120, explosion.radius);
+    const radiusSq = explosion.radius * explosion.radius;
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      if (distanceSq(enemy.position, center) <= radiusSq) {
+        enemy.takeDamage(explosion.damage, this, source);
+      }
     }
   }
 
-  private chainLightning(orb: Orb, primary: Enemy) {
-    const maxTargets = 4;
-    let remaining = Math.min(maxTargets, Math.floor(orb.lightningChains));
-    const struck = new Set<Enemy>([primary]);
-    let last = primary;
-    while (remaining > 0) {
-      let candidate: Enemy | undefined;
-      let bestDist = Infinity;
-      for (const enemy of this.enemies) {
-        if (!enemy.alive || struck.has(enemy)) continue;
-        const dist = distanceSq(enemy.position, last.position);
-        if (dist < bestDist && dist < 260 * 260) {
-          bestDist = dist;
-          candidate = enemy;
+  private tickChainLightning(damage: number, range: number) {
+    const aliveOrbs = this.orbs.filter((orb) => orb.alive);
+    if (aliveOrbs.length < 2) return;
+    const rangeSq = range * range;
+    const affected = new Set<Enemy>();
+    for (let i = 0; i < aliveOrbs.length; i++) {
+      for (let j = i + 1; j < aliveOrbs.length; j++) {
+        const a = aliveOrbs[i];
+        const b = aliveOrbs[j];
+        for (const enemy of this.enemies) {
+          if (!enemy.alive || affected.has(enemy)) continue;
+          const distSq = distanceToSegmentSq(enemy.position, a.position, b.position);
+          if (distSq <= rangeSq) {
+            enemy.takeDamage(damage, this, a);
+            this.spawnParticles(enemy.position, '#87bbff', 6, 40, 90);
+            affected.add(enemy);
+          }
         }
       }
-      if (!candidate) break;
-      candidate.takeDamage(orb.damage, this, orb);
-      this.spawnParticles(candidate.position, '#87bbff', 14, 60, 160);
-      struck.add(candidate);
-      last = candidate;
-      remaining -= 1;
     }
+  }
+
+  private computeOrbDamage(orb: Orb) {
+    const base = orb.damage;
+    const tier = Math.floor(this.comboHeat / 5);
+    return base + tier * this.modifiers.comboDamagePerTier;
   }
 
   private spawnParticles(position: Vector2, color: string, count: number, speed: number, radius: number) {
@@ -484,15 +574,26 @@ export class Game {
     }
     const direction = normalize(drag);
     const speed = 550 + clamp(power, 0, 280) * 3.2;
-    const orb = new Orb({ ...this.cannonPosition }, scale(direction, speed));
-    if (this.heldPowerUp) {
-      orb.applyPowerUp(this.heldPowerUp);
-      if (this.heldPowerUp === 'timewarp') {
-        this.timeWarpTimer = 2;
-      }
-      this.heldPowerUp = undefined;
+    const baseAngle = Math.atan2(direction.y, direction.x);
+    const count = this.modifiers.tripleLaunch ? 3 : 1;
+    const spread = 0.22;
+    const offsets = count === 1 ? [0] : [-spread, 0, spread];
+    for (const offset of offsets) {
+      const theta = baseAngle + offset;
+      const velocity = {
+        x: Math.cos(theta) * speed,
+        y: Math.sin(theta) * speed,
+      };
+      const orb = new Orb(
+        { ...this.cannonPosition },
+        velocity,
+        {
+          radius: 16 * this.modifiers.orbSizeMultiplier,
+          splitOnImpact: this.modifiers.splitOnImpact,
+        },
+      );
+      this.orbs.push(orb);
     }
-    this.orbs.push(orb);
     this.launchCooldown = 0.35;
     this.focus = clamp(this.focus - 5, 0, 100);
   }
@@ -507,18 +608,32 @@ export class Game {
     }, 1200);
   }
 
+  private createInitialModifiers(): ModifierState {
+    return {
+      orbSizeMultiplier: 1,
+      comboDamagePerTier: 0,
+      knockbackForce: 0,
+      homingStrength: 0,
+      splitOnImpact: false,
+      tripleLaunch: false,
+    };
+  }
+
   private reset() {
     this.score = 0;
     this.comboHeat = 0;
     this.comboTimer = 0;
     this.focus = 70;
     this.lives = 3;
-    this.heldPowerUp = undefined;
     this.waveId = 'S1-W1';
     this.orbs = [];
     this.enemies = [];
-    this.powerUps = [];
     this.particles = [];
+    this.availableModifiers = [...ALL_MODIFIERS];
+    this.modifiers = this.createInitialModifiers();
+    this.drafting = false;
+    this.pauseLocked = false;
+    this.draft.hide();
     this.waveManager.reset();
     this.updateHud();
   }
@@ -535,24 +650,9 @@ export class Game {
       focus: this.focus,
       lives: this.lives,
       wave: this.waveManager.waveNumber,
-      powerUp: this.getDisplayedPowerUp(),
+      lastModifier: this.modifiers.lastPicked,
     };
     this.hud.update(data);
-  }
-
-  private getDisplayedPowerUp(): PowerUpType | undefined {
-    if (this.timeWarpTimer > 0) {
-      return 'timewarp';
-    }
-    const orb = this.orbs.find((o) => o.alive);
-    if (orb) {
-      if (orb.lightningChains > 0) return 'lightning';
-      if (orb.pierceLeft > 0) return 'pierce';
-      if (orb.pendingSplit) return 'multiball';
-      if (orb.shieldHits > 0) return 'shield';
-      if (orb.ricochetBuff > 0.1) return 'ricochet';
-    }
-    return this.heldPowerUp;
   }
 
   private render() {
@@ -566,9 +666,7 @@ export class Game {
       enemy.draw(ctx);
     }
 
-    for (const power of this.powerUps) {
-      power.draw(ctx);
-    }
+    this.drawChainLinks(ctx);
 
     for (const orb of this.orbs) {
       if (!orb.alive) continue;
@@ -601,6 +699,33 @@ export class Game {
     }
 
     this.drawCannon(ctx);
+  }
+
+  private drawChainLinks(ctx: CanvasRenderingContext2D) {
+    if (!this.modifiers.chainLightning) return;
+    const alive = this.orbs.filter((orb) => orb.alive);
+    if (alive.length < 2) return;
+    ctx.save();
+    const intensity = (Math.sin(this.lastTime * 0.012) + 1) * 0.25 + 0.45;
+    ctx.globalAlpha = intensity;
+    ctx.lineWidth = 3.5;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = 'rgba(118, 169, 255, 0.85)';
+    for (let i = 0; i < alive.length; i++) {
+      for (let j = i + 1; j < alive.length; j++) {
+        const a = alive[i];
+        const b = alive[j];
+        const gradient = ctx.createLinearGradient(a.position.x, a.position.y, b.position.x, b.position.y);
+        gradient.addColorStop(0, 'rgba(118, 169, 255, 1)');
+        gradient.addColorStop(1, 'rgba(89, 255, 214, 1)');
+        ctx.strokeStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(a.position.x, a.position.y);
+        ctx.lineTo(b.position.x, b.position.y);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D) {
@@ -678,20 +803,4 @@ export class Game {
     };
   }
 
-  private formatPowerup(type: PowerUpType) {
-    switch (type) {
-      case 'lightning':
-        return 'Lightning';
-      case 'shield':
-        return 'Shield';
-      case 'multiball':
-        return 'Multiball';
-      case 'ricochet':
-        return 'Ricochet';
-      case 'pierce':
-        return 'Pierce';
-      case 'timewarp':
-        return 'Time Warp';
-    }
-  }
 }

@@ -1,6 +1,7 @@
 import './style.css';
 import { Game } from './game/Game';
 import { HUD } from './ui/HUD';
+import { PowerDraftOverlay } from './ui/PowerDraftOverlay';
 
 declare global {
   interface Window {
@@ -23,11 +24,12 @@ function bootstrap() {
   canvas.height = 1280;
 
   const hud = new HUD();
+  const draft = new PowerDraftOverlay();
 
-  shell.append(canvas, hud.element, hud.toastElement);
+  shell.append(canvas, hud.element, hud.toastElement, draft.element);
   app.appendChild(shell);
 
-  const game = new Game(canvas, hud);
+  const game = new Game(canvas, hud, draft);
   window.slingpunkGame = game;
 
   hud.onPauseRequested(() => {

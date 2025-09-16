@@ -1,5 +1,5 @@
 import type { Game } from '../Game';
-import type { EnemyKind, WaveEnemyConfig } from '../types';
+import type { WaveEnemyConfig } from '../types';
 import { pickWave } from './blueprints';
 
 interface ActiveSpawn {
@@ -8,14 +8,11 @@ interface ActiveSpawn {
   nextTime: number;
 }
 
-const POWERUPS: EnemyKind[] = ['GloobZigzag', 'SplitterGloob', 'ShieldyGloob', 'Magnetron', 'SporePuff'];
-
 export class WaveManager {
   private readonly game: Game;
   private spawns: ActiveSpawn[] = [];
   private elapsed = 0;
   private waveIndex = 0;
-  private currentDropChance = 0.08;
 
   constructor(game: Game) {
     this.game = game;
@@ -49,10 +46,6 @@ export class WaveManager {
     }
   }
 
-  get powerupChance() {
-    return this.currentDropChance;
-  }
-
   reset() {
     this.waveIndex = 0;
     this.elapsed = 0;
@@ -61,7 +54,6 @@ export class WaveManager {
 
   private loadWave(index: number) {
     const blueprint = pickWave(index);
-    this.currentDropChance = blueprint.powerupDropChance;
     this.spawns = blueprint.enemies.map((config) => ({
       config,
       spawned: 0,
@@ -78,8 +70,4 @@ export class WaveManager {
     });
   }
 
-  rollDrop(type: EnemyKind) {
-    if (!POWERUPS.includes(type)) return false;
-    return Math.random() < this.currentDropChance;
-  }
 }
