@@ -573,7 +573,7 @@ export class Game {
       return;
     }
     const direction = normalize(drag);
-    const speed = 550 + clamp(power, 0, 280) * 3.2;
+    const speed = (550 + clamp(power, 0, 280) * 3.2) * 3;
     const baseAngle = Math.atan2(direction.y, direction.x);
     const count = this.modifiers.tripleLaunch ? 3 : 1;
     const spread = 0.22;
