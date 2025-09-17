@@ -66,7 +66,10 @@ export type EnemyKind =
   | 'ShieldyGloob'
   | 'Splitterling'
   | 'Magnetron'
-  | 'SporePuff';
+  | 'SporePuff'
+  | 'BulwarkGloob'
+  | 'WarpStalker'
+  | 'AegisSentinel';
 
 export interface EnemyModifierSummary {
   id: string;

@@ -186,3 +186,133 @@ export class SporePuff extends Enemy {
     game.emitSporeCloud(this.position);
   }
 }
+
+export class BulwarkGloob extends Enemy {
+  private surgeTimer: number;
+
+  constructor(params: { position: Vector2; hp: number; speed: number }) {
+    super('BulwarkGloob', {
+      position: params.position,
+      hp: params.hp,
+      radius: 36,
+      speed: params.speed * 0.85,
+    });
+    this.shield = 6;
+    this.isElite = true;
+    this.surgeTimer = randomRange(1.8, 2.6);
+  }
+
+  protected behavior(dt: number) {
+    this.velocity.y = this.baseSpeed * 0.55;
+    this.velocity.x += Math.sin(this.elapsed * 0.9) * 16 * dt;
+    this.shield = Math.min(8, this.shield + dt * 1.6);
+
+    this.surgeTimer -= dt;
+    if (this.surgeTimer <= 0) {
+      this.surgeTimer = randomRange(2.5, 3.6);
+      this.velocity.y += 60;
+    }
+  }
+
+  protected getColor(): string {
+    return 'rgba(120, 214, 255, 0.9)';
+  }
+}
+
+export class WarpStalker extends Enemy {
+  private dashTimer: number;
+  private targetX: number;
+
+  constructor(params: { position: Vector2; hp: number; speed: number }) {
+    super('WarpStalker', {
+      position: params.position,
+      hp: params.hp,
+      radius: 24,
+      speed: params.speed * 1.15,
+    });
+    this.isElite = true;
+    this.dashTimer = randomRange(1.1, 2.1);
+    this.targetX = params.position.x;
+  }
+
+  protected behavior(dt: number, game: Game) {
+    const minX = 80;
+    const maxX = game.width - 80;
+    this.velocity.y = this.baseSpeed * 1.05;
+
+    this.dashTimer -= dt;
+    if (this.dashTimer <= 0) {
+      this.dashTimer = randomRange(1.4, 2.4);
+      const livingOrbs = game.orbs.filter((orb) => orb.alive);
+      if (livingOrbs.length) {
+        let orb = livingOrbs[0];
+        let bestDistance =
+          (orb.position.x - this.position.x) * (orb.position.x - this.position.x) +
+          (orb.position.y - this.position.y) * (orb.position.y - this.position.y);
+        for (let i = 1; i < livingOrbs.length; i++) {
+          const candidate = livingOrbs[i];
+          const dx = candidate.position.x - this.position.x;
+          const dy = candidate.position.y - this.position.y;
+          const distance = dx * dx + dy * dy;
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            orb = candidate;
+          }
+        }
+        const offset = randomRange(-70, 70);
+        this.targetX = clamp(orb.position.x + offset, minX, maxX);
+      } else {
+        this.targetX = clamp(this.position.x + randomRange(-140, 140), minX, maxX);
+      }
+      this.velocity.y += this.baseSpeed * 3.6;
+    }
+
+    const delta = this.targetX - this.position.x;
+    this.velocity.x += clamp(delta * 9 * dt, -260, 260);
+  }
+
+  protected getColor(): string {
+    return 'rgba(255, 113, 189, 0.92)';
+  }
+}
+
+export class AegisSentinel extends Enemy {
+  private pulseTimer: number;
+
+  constructor(params: { position: Vector2; hp: number; speed: number }) {
+    super('AegisSentinel', {
+      position: params.position,
+      hp: params.hp,
+      radius: 38,
+      speed: params.speed * 0.75,
+    });
+    this.isElite = true;
+    this.shield = 5;
+    this.pulseTimer = randomRange(2, 3.2);
+  }
+
+  protected behavior(dt: number, game: Game) {
+    this.velocity.y = this.baseSpeed * 0.6;
+    this.velocity.x += Math.sin(this.elapsed * 0.8) * 12 * dt;
+    this.shield = Math.min(9, this.shield + dt * 1.4);
+
+    this.pulseTimer -= dt;
+    if (this.pulseTimer <= 0) {
+      this.pulseTimer = randomRange(2.6, 3.6);
+      for (const enemy of game.enemies) {
+        if (enemy === this || !enemy.alive) continue;
+        const dx = enemy.position.x - this.position.x;
+        const dy = enemy.position.y - this.position.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= 180 * 180) {
+          enemy.shield = Math.min(enemy.shield + 1.5, 6);
+          enemy.hp = Math.min(enemy.maxHp, enemy.hp + 0.4);
+        }
+      }
+    }
+  }
+
+  protected getColor(): string {
+    return 'rgba(255, 229, 146, 0.95)';
+  }
+}
