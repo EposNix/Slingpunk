@@ -15,12 +15,15 @@ import { add, clamp, distanceSq, distanceToSegmentSq, length, normalize, scale, 
 import { Orb } from './entities/Orb';
 import type { Enemy } from './entities/Enemy';
 import {
+  AegisSentinel,
+  BulwarkGloob,
   GloobZigzag,
   Magnetron,
   ShieldyGloob,
   SplitterGloob,
   Splitterling,
   SporePuff,
+  WarpStalker,
 } from './entities/EnemyTypes';
 import { WaveManager } from './waves/WaveManager';
 import { MAJOR_MODIFIERS, UPGRADE_MODIFIERS, type DraftModifier } from './modifiers';
@@ -578,6 +581,15 @@ export class Game {
         break;
       case 'SporePuff':
         enemy = new SporePuff(spawnParams);
+        break;
+      case 'BulwarkGloob':
+        enemy = new BulwarkGloob(spawnParams);
+        break;
+      case 'WarpStalker':
+        enemy = new WarpStalker(spawnParams);
+        break;
+      case 'AegisSentinel':
+        enemy = new AegisSentinel(spawnParams);
         break;
       default:
         enemy = new GloobZigzag(spawnParams);
