@@ -1,6 +1,9 @@
 import './style.css';
 import { Game } from './game/Game';
+import { DEFAULT_DIFFICULTY, DIFFICULTIES } from './game/difficulty';
+import type { DifficultyDefinition } from './game/types';
 import { HUD } from './ui/HUD';
+import { IntroMenu } from './ui/IntroMenu';
 import { PauseOverlay } from './ui/PauseOverlay';
 import { PowerDraftOverlay } from './ui/PowerDraftOverlay';
 
@@ -27,18 +30,50 @@ function bootstrap() {
   const hud = new HUD();
   const draft = new PowerDraftOverlay();
   const pauseOverlay = new PauseOverlay();
+  const introMenu = new IntroMenu(DIFFICULTIES);
 
-  shell.append(canvas, hud.element, hud.toastElement, pauseOverlay.element, draft.element);
+  shell.append(
+    canvas,
+    hud.element,
+    hud.toastElement,
+    pauseOverlay.element,
+    draft.element,
+    introMenu.element,
+  );
   app.appendChild(shell);
 
-  const game = new Game(canvas, hud, draft, pauseOverlay);
-  window.slingpunkGame = game;
+  let currentGame: Game | null = null;
+  window.slingpunkGame = undefined;
+
+  const beginRun = (difficulty: DifficultyDefinition) => {
+    introMenu.hide();
+    if (currentGame) {
+      currentGame.dispose();
+    }
+    currentGame = new Game(canvas, hud, draft, pauseOverlay, difficulty);
+    window.slingpunkGame = currentGame;
+    currentGame.start();
+  };
 
   hud.onPauseRequested(() => {
-    game.togglePause();
+    currentGame?.togglePause();
   });
 
-  game.start();
+  pauseOverlay.onQuitRequested(() => {
+    if (currentGame) {
+      currentGame.dispose();
+      currentGame = null;
+    }
+    window.slingpunkGame = undefined;
+    hud.setPaused(false);
+    introMenu.show();
+  });
+
+  introMenu.onStart((difficulty) => {
+    beginRun(difficulty);
+  });
+
+  introMenu.selectDifficulty(DEFAULT_DIFFICULTY.id);
 }
 
 document.addEventListener('DOMContentLoaded', bootstrap);

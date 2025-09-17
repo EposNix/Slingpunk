@@ -2,6 +2,7 @@ import { HUD } from '../ui/HUD';
 import { PauseOverlay, type PauseOverlayPlayerModifier } from '../ui/PauseOverlay';
 import { PowerDraftOverlay } from '../ui/PowerDraftOverlay';
 import type {
+  DifficultyDefinition,
   EnemyKind,
   EnemyWaveScaling,
   HudData,
@@ -125,12 +126,14 @@ export class Game {
   private completedWaves = 0;
   private enemyScaling: EnemyWaveScaling;
   private playerModifierCounts = new Map<RunModifierId, number>();
+  private difficulty: DifficultyDefinition;
 
   constructor(
     canvas: HTMLCanvasElement,
     hud: HUD,
     draft: PowerDraftOverlay,
     pauseOverlay: PauseOverlay,
+    difficulty: DifficultyDefinition,
   ) {
     this.canvas = canvas;
     const context = canvas.getContext('2d');
@@ -149,6 +152,7 @@ export class Game {
     this.modifiers = this.createInitialModifiers();
     this.lives = this.maxLives;
     this.enemyScaling = this.createDefaultEnemyScaling();
+    this.difficulty = difficulty;
 
     this.pauseOverlay.onResumeRequested(() => {
       if (this.paused && !this.pauseLocked) {
@@ -165,12 +169,17 @@ export class Game {
 
   start() {
     if (this.running) return;
+    this.reset();
     this.running = true;
+    this.paused = false;
+    this.hud.setPaused(false);
+    this.pauseOverlay.setVisible(false);
     this.lastTime = performance.now();
     requestAnimationFrame(this.loop);
   }
 
   togglePause() {
+    if (!this.running) return;
     if (this.pauseLocked) return;
     this.paused = !this.paused;
     this.hud.setPaused(this.paused);
@@ -179,6 +188,20 @@ export class Game {
     if (!this.paused) {
       this.lastTime = performance.now();
     }
+  }
+
+  dispose() {
+    this.running = false;
+    this.paused = false;
+    this.hud.setPaused(false);
+    this.pauseOverlay.setVisible(false);
+    this.reset();
+    this.pauseOverlay.onResumeRequested(() => {});
+    this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.canvas.removeEventListener('pointermove', this.onPointerMove);
+    this.canvas.removeEventListener('pointerup', this.onPointerUp);
+    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    window.removeEventListener('resize', this.onResize);
   }
 
   get hasActiveOrbs() {
@@ -558,7 +581,8 @@ export class Game {
     const scaling = this.enemyScaling;
     const scaledHpValue = params.hp * scaling.hpMultiplier + scaling.hpBonus;
     const minimumHp = params.hp + Math.floor(scaling.level / 3);
-    const hp = Math.max(1, Math.max(Math.round(scaledHpValue), minimumHp));
+    const baseHp = Math.max(1, Math.max(Math.round(scaledHpValue), minimumHp));
+    const hp = Math.max(1, Math.round(baseHp * this.difficulty.enemyHpMultiplier));
     const speed = params.speed * scaling.speedMultiplier;
     const spawnParams = { position: params.position, hp, speed };
 
@@ -607,6 +631,9 @@ export class Game {
   }
 
   private onPointerDown = (event: PointerEvent) => {
+    if (!this.running || this.paused || this.drafting) {
+      return;
+    }
     const point = this.eventToCanvas(event);
     if (!this.pointer.dragging && this.launchCooldown <= 0) {
       this.pointer = {
@@ -626,6 +653,9 @@ export class Game {
   };
 
   private onPointerMove = (event: PointerEvent) => {
+    if (!this.running || this.paused) {
+      return;
+    }
     const point = this.eventToCanvas(event);
     if (this.pointer.dragging && this.pointer.pointerId === event.pointerId) {
       this.pointer.current = point;
@@ -636,6 +666,12 @@ export class Game {
   };
 
   private onPointerUp = (event: PointerEvent) => {
+    if (!this.running || this.paused) {
+      if (this.canvas.hasPointerCapture(event.pointerId)) {
+        this.canvas.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (this.pointer.dragging && this.pointer.pointerId === event.pointerId) {
       const point = this.eventToCanvas(event);
       this.pointer.dragging = false;
@@ -827,7 +863,7 @@ export class Game {
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
       if (distanceSq(enemy.position, center) <= radiusSq) {
-        enemy.takeDamage(explosion.damage, this, source);
+        enemy.takeDamage(this.scalePlayerDamage(explosion.damage), this, source);
       }
     }
   }
@@ -837,6 +873,7 @@ export class Game {
     if (aliveOrbs.length < 2) return;
     const rangeSq = range * range;
     const affected = new Set<Enemy>();
+    const scaledDamage = this.scalePlayerDamage(damage);
     for (let i = 0; i < aliveOrbs.length; i++) {
       for (let j = i + 1; j < aliveOrbs.length; j++) {
         const a = aliveOrbs[i];
@@ -845,7 +882,7 @@ export class Game {
           if (!enemy.alive || affected.has(enemy)) continue;
           const distSq = distanceToSegmentSq(enemy.position, a.position, b.position);
           if (distSq <= rangeSq) {
-            enemy.takeDamage(damage, this, a);
+            enemy.takeDamage(scaledDamage, this, a);
             this.spawnParticles(enemy.position, '#87bbff', 6, 40, 90);
             affected.add(enemy);
           }
@@ -877,7 +914,12 @@ export class Game {
     }
 
     const tier = Math.floor(this.comboHeat / 5);
-    return damage + tier * this.modifiers.comboDamagePerTier;
+    damage += tier * this.modifiers.comboDamagePerTier;
+    return this.scalePlayerDamage(damage);
+  }
+
+  private scalePlayerDamage(amount: number) {
+    return amount * this.difficulty.playerDamageMultiplier;
   }
 
   private isBossOrElite(enemy: Enemy) {

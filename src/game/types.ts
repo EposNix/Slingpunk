@@ -5,6 +5,16 @@ export interface Vector2 {
 
 export type ModifierRarity = 'common' | 'uncommon' | 'rare';
 
+export interface DifficultyDefinition {
+  id: string;
+  name: string;
+  tagline: string;
+  description: string;
+  playerDamageMultiplier: number;
+  enemyHpMultiplier: number;
+  isDefault?: boolean;
+}
+
 export type RunModifierId =
   | 'bulwarkCore'
   | 'cryoCoating'
