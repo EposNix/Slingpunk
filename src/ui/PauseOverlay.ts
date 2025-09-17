@@ -18,7 +18,9 @@ export class PauseOverlay {
   private readonly enemyList: HTMLDivElement;
   private readonly enemyEmpty: HTMLParagraphElement;
   private readonly resumeButton: HTMLButtonElement;
+  private readonly quitButton: HTMLButtonElement;
   private resumeHandler?: () => void;
+  private quitHandler?: () => void;
 
   constructor() {
     this.element = document.createElement('div');
@@ -74,11 +76,19 @@ export class PauseOverlay {
       this.resumeHandler?.();
     });
 
+    this.quitButton = document.createElement('button');
+    this.quitButton.type = 'button';
+    this.quitButton.className = 'pause-overlay__quit';
+    this.quitButton.textContent = 'Quit to Menu';
+    this.quitButton.addEventListener('click', () => {
+      this.quitHandler?.();
+    });
+
     const hint = document.createElement('p');
     hint.className = 'pause-overlay__hint';
-    hint.textContent = 'Tap outside or press Resume to continue.';
+    hint.textContent = 'Tap outside or choose an action below.';
 
-    actions.append(this.resumeButton, hint);
+    actions.append(this.resumeButton, this.quitButton, hint);
 
     panel.append(heading, content, actions);
     this.element.append(panel);
@@ -97,6 +107,10 @@ export class PauseOverlay {
 
   onResumeRequested(handler: () => void) {
     this.resumeHandler = handler;
+  }
+
+  onQuitRequested(handler: () => void) {
+    this.quitHandler = handler;
   }
 
   setPlayerModifiers(modifiers: PauseOverlayPlayerModifier[]) {
