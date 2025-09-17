@@ -12,7 +12,17 @@ import type {
   Vector2,
   WaveStartAnnouncement,
 } from './types';
-import { add, clamp, distanceSq, distanceToSegmentSq, length, normalize, scale, subtract } from './utils';
+import {
+  add,
+  clamp,
+  distanceSq,
+  distanceToSegmentSq,
+  length,
+  normalize,
+  randomRange,
+  scale,
+  subtract,
+} from './utils';
 import { Orb } from './entities/Orb';
 import type { Enemy } from './entities/Enemy';
 import {
@@ -41,12 +51,21 @@ interface AftertouchState {
   direction: number;
 }
 
+type ParticleKind = 'spark' | 'ember';
+
 interface Particle {
   position: Vector2;
   velocity: Vector2;
   life: number;
+  maxLife: number;
   size: number;
   color: string;
+  glow: string;
+  rotation: number;
+  rotationSpeed: number;
+  stretch: number;
+  drag: number;
+  type: ParticleKind;
 }
 
 interface FloatingText {
@@ -70,6 +89,27 @@ interface ImpactWave {
   color: string;
 }
 
+interface BackgroundStar {
+  xPercent: number;
+  yPercent: number;
+  radius: number;
+  twinkleSpeed: number;
+  twinklePhase: number;
+  parallax: number;
+  color: string;
+}
+
+interface EnergyRibbon {
+  offset: number;
+  amplitude: number;
+  frequency: number;
+  speed: number;
+  thickness: number;
+  color: string;
+  glow: string;
+  phase: number;
+}
+
 export class Game {
   public readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -88,6 +128,8 @@ export class Game {
   private particles: Particle[] = [];
   private floatingTexts: FloatingText[] = [];
   private impactWaves: ImpactWave[] = [];
+  private backgroundStars: BackgroundStar[] = [];
+  private backgroundRibbons: EnergyRibbon[] = [];
   private screenShakeOffset: Vector2 = { x: 0, y: 0 };
   private screenShakeTimer = 0;
   private screenShakeDuration = 0;
@@ -153,6 +195,8 @@ export class Game {
     this.lives = this.maxLives;
     this.enemyScaling = this.createDefaultEnemyScaling();
     this.difficulty = difficulty;
+
+    this.seedBackdrop();
 
     this.pauseOverlay.onResumeRequested(() => {
       if (this.paused && !this.pauseLocked) {
@@ -754,6 +798,13 @@ export class Game {
     for (const particle of this.particles) {
       particle.life -= dt;
       particle.position = add(particle.position, scale(particle.velocity, dt));
+      const drag = Math.pow(particle.drag, dt * 60);
+      particle.velocity.x *= drag;
+      particle.velocity.y *= drag;
+      if (particle.type === 'ember') {
+        particle.velocity.y += 40 * dt;
+      }
+      particle.rotation += particle.rotationSpeed * dt;
     }
     this.particles = this.particles.filter((p) => p.life > 0);
 
@@ -928,15 +979,38 @@ export class Game {
 
   private spawnParticles(position: Vector2, color: string, count: number, speed: number, radius: number) {
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const magnitude = Math.random() * speed;
-      this.particles.push({
-        position: { ...position },
-        velocity: { x: Math.cos(angle) * magnitude, y: Math.sin(angle) * magnitude },
-        life: 0.5 + Math.random() * 0.4,
-        size: Math.random() * 6 + 2,
+      const type: ParticleKind = Math.random() < 0.65 ? 'spark' : 'ember';
+      const baseAngle = Math.random() * Math.PI * 2;
+      const spawnRadius = Math.random() * radius * 0.4;
+      const spawn = {
+        x: position.x + Math.cos(baseAngle) * spawnRadius,
+        y: position.y + Math.sin(baseAngle) * spawnRadius,
+      };
+      const life = randomRange(0.4, 0.85);
+      const magnitude = speed * (type === 'spark' ? randomRange(0.45, 1) : randomRange(0.2, 0.55));
+      const velocity = {
+        x: Math.cos(baseAngle) * magnitude,
+        y: Math.sin(baseAngle) * magnitude,
+      };
+      const glow =
+        type === 'spark'
+          ? 'rgba(255, 255, 255, 0.65)'
+          : 'rgba(255, 255, 255, 0.28)';
+      const particle: Particle = {
+        position: spawn,
+        velocity,
+        life,
+        maxLife: life,
+        size: type === 'spark' ? randomRange(14, 26) : randomRange(5, 11),
         color,
-      });
+        glow,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: type === 'spark' ? randomRange(-8, 8) : randomRange(-2, 2),
+        stretch: type === 'spark' ? randomRange(1.3, 2.8) : randomRange(0.3, 1),
+        drag: type === 'spark' ? 0.82 : 0.9,
+        type,
+      };
+      this.particles.push(particle);
     }
   }
 
@@ -1008,6 +1082,57 @@ export class Game {
       countMultiplier: 1,
       cadenceMultiplier: 1,
     };
+  }
+
+  private seedBackdrop() {
+    const starCount = 96;
+    this.backgroundStars = Array.from({ length: starCount }, () => ({
+      xPercent: Math.random(),
+      yPercent: Math.random(),
+      radius: randomRange(1.1, 2.6),
+      twinkleSpeed: randomRange(0.35, 1.15),
+      twinklePhase: Math.random() * Math.PI * 2,
+      parallax: randomRange(0.3, 1),
+      color:
+        Math.random() < 0.35
+          ? 'rgba(88, 196, 255, 1)'
+          : Math.random() < 0.55
+            ? 'rgba(255, 131, 201, 1)'
+            : 'rgba(124, 255, 205, 1)',
+    }));
+
+    this.backgroundRibbons = [
+      {
+        offset: 0.28,
+        amplitude: 0.08,
+        frequency: 2.1,
+        speed: 0.32,
+        thickness: 90,
+        color: 'rgba(57, 116, 255, 0.18)',
+        glow: 'rgba(107, 196, 255, 0.45)',
+        phase: Math.random() * Math.PI * 2,
+      },
+      {
+        offset: 0.52,
+        amplitude: 0.06,
+        frequency: 2.8,
+        speed: 0.46,
+        thickness: 72,
+        color: 'rgba(255, 96, 188, 0.14)',
+        glow: 'rgba(255, 149, 231, 0.42)',
+        phase: Math.random() * Math.PI * 2,
+      },
+      {
+        offset: 0.74,
+        amplitude: 0.05,
+        frequency: 2.35,
+        speed: 0.38,
+        thickness: 58,
+        color: 'rgba(82, 255, 214, 0.12)',
+        glow: 'rgba(140, 255, 223, 0.38)',
+        phase: Math.random() * Math.PI * 2,
+      },
+    ];
   }
 
   private reset() {
@@ -1099,23 +1224,82 @@ export class Game {
       if (!orb.alive) continue;
       ctx.save();
       ctx.translate(orb.position.x, orb.position.y);
-      ctx.fillStyle = orb.color;
+      const speed = length(orb.velocity);
+      const momentum = clamp(speed / 1600, 0, 1);
+      const heading = Math.atan2(orb.velocity.y, orb.velocity.x);
+      const tailLength = orb.radius * (2.2 + momentum * 5.2);
+      const tailWidth = orb.radius * (0.8 + momentum * 0.35);
+
+      ctx.rotate(heading);
+      const tailGradient = ctx.createLinearGradient(-tailLength, 0, orb.radius * 0.8, 0);
+      tailGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      tailGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');
+      tailGradient.addColorStop(1, orb.color);
+      ctx.fillStyle = tailGradient;
+      ctx.globalAlpha = 0.45 + momentum * 0.4;
       ctx.shadowColor = orb.color;
-      ctx.shadowBlur = 18;
+      ctx.shadowBlur = 24 + momentum * 30;
+      ctx.beginPath();
+      ctx.moveTo(-tailLength, -tailWidth * 0.6);
+      ctx.quadraticCurveTo(-tailLength * 0.3, 0, -tailLength, tailWidth * 0.6);
+      ctx.lineTo(orb.radius, tailWidth);
+      ctx.quadraticCurveTo(orb.radius + tailWidth * 0.7, 0, orb.radius, -tailWidth);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = 1;
+      const coreGradient = ctx.createRadialGradient(0, 0, orb.radius * 0.1, 0, 0, orb.radius * 1.05);
+      coreGradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      coreGradient.addColorStop(0.4, orb.color);
+      coreGradient.addColorStop(1, 'rgba(12, 8, 30, 0.65)');
+      ctx.fillStyle = coreGradient;
       ctx.beginPath();
       ctx.arc(0, 0, orb.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.3 + momentum * 0.45;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.beginPath();
+      ctx.ellipse(orb.radius * 0.15, -orb.radius * 0.2, orb.radius * 0.65, orb.radius * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
 
     for (const particle of this.particles) {
+      const ratio = Math.max(0, particle.life / particle.maxLife);
       ctx.save();
       ctx.translate(particle.position.x, particle.position.y);
-      ctx.fillStyle = particle.color;
-      ctx.globalAlpha = Math.max(0, Math.min(1, particle.life * 1.4));
-      ctx.beginPath();
-      ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
-      ctx.fill();
+      if (particle.type === 'spark') {
+        ctx.rotate(particle.rotation);
+        const length = particle.size * particle.stretch * (0.5 + ratio);
+        const width = Math.max(1.2, particle.size * 0.12);
+        const gradient = ctx.createLinearGradient(-length, 0, length, 0);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        gradient.addColorStop(0.3, particle.glow);
+        gradient.addColorStop(0.55, particle.color);
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.globalAlpha = Math.pow(ratio, 0.55);
+        ctx.lineWidth = width;
+        ctx.strokeStyle = gradient;
+        ctx.shadowColor = particle.glow;
+        ctx.shadowBlur = 18 * ratio;
+        ctx.beginPath();
+        ctx.moveTo(-length, 0);
+        ctx.lineTo(length, 0);
+        ctx.stroke();
+      } else {
+        const radius = particle.size * (0.6 + particle.stretch * 0.4 * ratio);
+        const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+        gradient.addColorStop(0, particle.glow);
+        gradient.addColorStop(0.55, particle.color);
+        gradient.addColorStop(1, 'rgba(12, 10, 30, 0)');
+        ctx.globalAlpha = Math.pow(ratio, 0.7);
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
 
@@ -1170,16 +1354,69 @@ export class Game {
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D) {
-    const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
-    gradient.addColorStop(0, '#09061b');
-    gradient.addColorStop(0.5, '#05020d');
-    gradient.addColorStop(1, '#080018');
-    ctx.fillStyle = gradient;
+    ctx.save();
+    const base = ctx.createLinearGradient(0, 0, 0, this.height);
+    base.addColorStop(0, '#06061b');
+    base.addColorStop(0.45, '#07041a');
+    base.addColorStop(1, '#100024');
+    ctx.fillStyle = base;
     ctx.fillRect(0, 0, this.width, this.height);
+
+    const apex = ctx.createLinearGradient(0, 0, 0, this.height);
+    apex.addColorStop(0, 'rgba(96, 167, 255, 0.18)');
+    apex.addColorStop(0.4, 'rgba(41, 12, 64, 0)');
+    apex.addColorStop(1, 'rgba(255, 87, 167, 0.12)');
+    ctx.fillStyle = apex;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const time = this.lastTime * 0.001;
+    ctx.lineJoin = 'round';
+    for (const ribbon of this.backgroundRibbons) {
+      const baseY = this.height * ribbon.offset;
+      const amplitude = this.height * ribbon.amplitude * (1 + Math.sin(time * 0.6 + ribbon.phase) * 0.2);
+      const frequency = ribbon.frequency;
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = ribbon.color;
+      ctx.lineWidth = ribbon.thickness;
+      ctx.shadowColor = ribbon.glow;
+      ctx.shadowBlur = 120;
+      ctx.beginPath();
+      for (let x = -200; x <= this.width + 200; x += 28) {
+        const progress = (x / this.width) * Math.PI * frequency;
+        const y = baseY + Math.sin(progress + time * ribbon.speed + ribbon.phase) * amplitude;
+        if (x === -200) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const star of this.backgroundStars) {
+      const twinkle = (Math.sin(time * star.twinkleSpeed + star.twinklePhase) + 1) * 0.5;
+      const x = star.xPercent * this.width - this.screenShakeOffset.x * (1 - star.parallax);
+      const yRange = this.height - this.bottomSafeZone * 0.4;
+      const y = star.yPercent * yRange - this.screenShakeOffset.y * (1 - star.parallax);
+      const radius = star.radius * (0.6 + twinkle * 0.7);
+      ctx.globalAlpha = 0.25 + twinkle * 0.65;
+      ctx.fillStyle = star.color;
+      ctx.shadowColor = star.color;
+      ctx.shadowBlur = 14 * (0.3 + twinkle);
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
 
     ctx.strokeStyle = 'rgba(79, 168, 255, 0.08)';
     ctx.lineWidth = 1;
-    for (let y = this.height - this.bottomSafeZone; y >= 0; y -= 100) {
+    const gridBottom = this.height - this.bottomSafeZone;
+    for (let y = gridBottom; y >= 0; y -= 100) {
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(this.width, y);
@@ -1190,22 +1427,23 @@ export class Game {
     if (comboGlow > 0) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.12 + comboGlow * 0.3;
+      ctx.globalAlpha = 0.14 + comboGlow * 0.32;
       const pulse = ctx.createRadialGradient(
         this.width / 2,
         this.height - this.bottomSafeZone,
         this.width * 0.1,
         this.width / 2,
         this.height - this.bottomSafeZone,
-        this.width * 0.8,
+        this.width * 0.85,
       );
       pulse.addColorStop(0, 'rgba(255, 86, 177, 1)');
-      pulse.addColorStop(0.5, 'rgba(255, 124, 92, 0.6)');
+      pulse.addColorStop(0.45, 'rgba(255, 124, 92, 0.6)');
       pulse.addColorStop(1, 'rgba(255, 86, 177, 0)');
       ctx.fillStyle = pulse;
       ctx.fillRect(0, 0, this.width, this.height);
       ctx.restore();
     }
+    ctx.restore();
   }
 
   private drawAim(ctx: CanvasRenderingContext2D) {
