@@ -101,7 +101,13 @@ export class PauseOverlay {
     this.element.classList.toggle('visible', visible);
     this.element.setAttribute('aria-hidden', visible ? 'false' : 'true');
     if (visible) {
-      this.resumeButton.focus();
+      this.resumeButton.focus({ preventScroll: true });
+    } else {
+      if (this.element.contains(document.activeElement)) {
+        (document.activeElement as HTMLElement).blur();
+      }
+      this.resumeButton.blur();
+      this.quitButton.blur();
     }
   }
 
