@@ -1,6 +1,6 @@
 import { HUD } from '../ui/HUD';
 import { PauseOverlay, type PauseOverlayPlayerModifier } from '../ui/PauseOverlay';
-import { PowerDraftOverlay } from '../ui/PowerDraftOverlay';
+import { PowerDraftOverlay, DraftCancelledError } from '../ui/PowerDraftOverlay';
 import type {
   DifficultyDefinition,
   EnemyKind,
@@ -160,6 +160,7 @@ export class Game {
   private paused = false;
   private lastTime = 0;
   private launchCooldown = 0;
+  private pauseInputCooldown = 0;
 
   private score = 0;
   private comboHeat = 0;
@@ -239,10 +240,12 @@ export class Game {
   togglePause() {
     if (!this.running) return;
     if (this.pauseLocked) return;
+    if (this.pauseInputCooldown > 0) return;
     this.paused = !this.paused;
     this.hud.setPaused(this.paused);
     this.syncPlayerModifiersOverlay();
     this.pauseOverlay.setVisible(this.paused);
+    this.pauseInputCooldown = 0.2;
     if (!this.paused) {
       this.lastTime = performance.now();
     }
@@ -320,36 +323,51 @@ export class Game {
     this.paused = true;
     this.hud.setPaused(true);
 
-    const upgradeOptions = this.pickUpgradeOptions();
-    if (upgradeOptions.length > 0) {
-      const choice = await this.draft.present(upgradeOptions, {
-        title: 'Choose your enhancement',
-        subtitle: 'Stack tuning upgrades or restore a heart between waves.',
-      });
-      this.applyModifier(choice);
-    }
-
-    const shouldOfferMajor =
-      this.availableMajorModifiers.length > 0 && this.completedWaves % 3 === 0;
-    if (shouldOfferMajor) {
-      const majorOptions = this.pickMajorOptions();
-      if (majorOptions.length > 0) {
-        const choice = await this.draft.present(majorOptions, {
-          title: 'Choose a core modifier',
-          subtitle: 'Select one of the experimental puck mods.',
+    let cancelled = false;
+    try {
+      const upgradeOptions = this.pickUpgradeOptions();
+      if (upgradeOptions.length > 0) {
+        const choice = await this.draft.present(upgradeOptions, {
+          title: 'Choose your enhancement',
+          subtitle: 'Stack tuning upgrades or restore a heart between waves.',
         });
         this.applyModifier(choice);
-        this.availableMajorModifiers = this.availableMajorModifiers.filter(
-          (mod) => mod.id !== choice.id,
-        );
+      }
+
+      const shouldOfferMajor =
+        this.availableMajorModifiers.length > 0 && this.completedWaves % 3 === 0;
+      if (shouldOfferMajor) {
+        const majorOptions = this.pickMajorOptions();
+        if (majorOptions.length > 0) {
+          const choice = await this.draft.present(majorOptions, {
+            title: 'Choose a core modifier',
+            subtitle: 'Select one of the experimental puck mods.',
+          });
+          this.applyModifier(choice);
+          this.availableMajorModifiers = this.availableMajorModifiers.filter(
+            (mod) => mod.id !== choice.id,
+          );
+        }
+      }
+    } catch (error) {
+      if (error instanceof DraftCancelledError) {
+        cancelled = true;
+      } else {
+        throw error;
+      }
+    } finally {
+      this.drafting = false;
+      this.pauseLocked = false;
+      this.paused = false;
+      this.pauseOverlay.setVisible(false);
+      this.pauseInputCooldown = Math.max(this.pauseInputCooldown, 0.2);
+      if (this.running) {
+        this.hud.setPaused(false);
+      }
+      if (!cancelled && this.running) {
+        this.lastTime = performance.now();
       }
     }
-
-    this.drafting = false;
-    this.pauseLocked = false;
-    this.paused = false;
-    this.hud.setPaused(false);
-    this.lastTime = performance.now();
   }
 
   private pickMajorOptions(): DraftModifier[] {
@@ -795,6 +813,7 @@ export class Game {
 
   private update(dt: number) {
     this.launchCooldown = Math.max(0, this.launchCooldown - dt);
+    this.pauseInputCooldown = Math.max(0, this.pauseInputCooldown - dt);
     this.waveManager.update(dt);
 
     if (this.aftertouch.active && this.focus > 0) {
@@ -1291,6 +1310,7 @@ export class Game {
     this.screenShakeDuration = 0;
     this.screenShakeIntensity = 0;
     this.novaCharge = 0;
+    this.pauseInputCooldown = 0;
     this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
     this.playerModifierCounts.clear();
@@ -1301,7 +1321,7 @@ export class Game {
     this.pauseOverlay.setVisible(false);
     this.syncPlayerModifiersOverlay();
     this.pauseOverlay.setEnemyModifiers([]);
-    this.draft.hide();
+    this.draft.cancel();
     this.waveManager.reset();
     this.updateHud();
   }

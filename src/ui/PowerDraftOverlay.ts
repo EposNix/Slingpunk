@@ -1,11 +1,19 @@
 import type { DraftModifier } from '../game/modifiers';
 
+export class DraftCancelledError extends Error {
+  constructor() {
+    super('Draft cancelled');
+    this.name = 'DraftCancelledError';
+  }
+}
+
 export class PowerDraftOverlay {
   public readonly element: HTMLDivElement;
   private readonly optionsGrid: HTMLDivElement;
   private readonly title: HTMLHeadingElement;
   private readonly subtitle: HTMLParagraphElement;
   private resolve?: (choice: DraftModifier) => void;
+  private reject?: (reason?: unknown) => void;
   private active = false;
 
   constructor() {
@@ -38,8 +46,9 @@ export class PowerDraftOverlay {
     this.subtitle.textContent =
       config?.subtitle ?? 'Select one of the three experimental puck mods.';
 
-    return new Promise<DraftModifier>((resolve) => {
+    return new Promise<DraftModifier>((resolve, reject) => {
       this.resolve = resolve;
+      this.reject = reject;
       for (const option of options) {
         this.optionsGrid.appendChild(this.createOptionCard(option));
       }
@@ -50,6 +59,21 @@ export class PowerDraftOverlay {
   hide() {
     this.element.classList.remove('visible');
     this.element.style.pointerEvents = 'none';
+  }
+
+  cancel() {
+    if (!this.active) {
+      this.resolve = undefined;
+      this.reject = undefined;
+      this.hide();
+      return;
+    }
+    this.active = false;
+    const rejecter = this.reject;
+    this.resolve = undefined;
+    this.reject = undefined;
+    this.hide();
+    rejecter?.(new DraftCancelledError());
   }
 
   private show() {
@@ -81,9 +105,10 @@ export class PowerDraftOverlay {
   private finish(option: DraftModifier) {
     if (!this.active) return;
     this.active = false;
-    this.hide();
     const resolver = this.resolve;
     this.resolve = undefined;
+    this.reject = undefined;
+    this.hide();
     resolver?.(option);
   }
 }
