@@ -1449,9 +1449,9 @@ export class Game {
     const pulse =
       transition.phase === 'intro'
         ? this.easeOutCubic(progress)
-        : this.easeOutCubic(Math.min(1, progress * 1.2));
+        : this.easeInOutCubic(1 - progress);
     const centerX = this.width / 2;
-    const centerY = this.height - this.bottomSafeZone * 0.55;
+    const centerY = this.height / 2;
     const reach = Math.max(this.width, this.height);
     const radius = reach * (0.35 + pulse * 0.5);
 
@@ -1490,8 +1490,8 @@ export class Game {
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
 
-    const titleAlpha = transition.phase === 'intro' ? pulse : Math.sin(Math.min(1, progress) * Math.PI * 0.9);
-    const subtitleAlpha = transition.phase === 'intro' ? clamp(pulse - 0.25, 0, 1) : clamp(Math.pow(pulse, 0.8), 0, 1);
+    const titleAlpha = pulse;
+    const subtitleAlpha = transition.phase === 'intro' ? clamp(pulse - 0.25, 0, 1) : clamp(pulse * 0.9, 0, 1);
     const titleSize = 66 + pulse * 12;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
