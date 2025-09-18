@@ -123,6 +123,8 @@ export class Game {
   public height: number;
   public readonly bottomSafeZone = 180;
   public readonly baseEnemySpeed = 55;
+  private readonly floatingTextLimit = 80;
+  private readonly minDamageForFloatingText = 1;
 
   public orbs: Orb[] = [];
   public enemies: Enemy[] = [];
@@ -537,6 +539,9 @@ export class Game {
     if (amount <= 0 || !Number.isFinite(amount)) {
       return;
     }
+    if (amount < this.minDamageForFloatingText) {
+      return;
+    }
     const formatted = this.formatDamageNumber(amount);
     const magnitude = Math.sqrt(Math.max(amount, 1));
     const baseSize = options.shield ? 22 : 26;
@@ -594,6 +599,10 @@ export class Game {
       weight: options.weight ?? 700,
       pop: options.pop ?? 0.4,
     };
+    if (this.floatingTexts.length >= this.floatingTextLimit) {
+      const overflow = this.floatingTexts.length - this.floatingTextLimit + 1;
+      this.floatingTexts.splice(0, overflow);
+    }
     this.floatingTexts.push(text);
   }
 
