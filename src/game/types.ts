@@ -68,6 +68,10 @@ export interface HudData {
   lives: number;
   wave: number;
   lastModifier?: RunModifierId;
+  specialCharge: number;
+  specialMax: number;
+  specialReady: boolean;
+  specialName: string;
 }
 
 export type EnemyKind =

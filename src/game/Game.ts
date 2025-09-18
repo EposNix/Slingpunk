@@ -51,7 +51,7 @@ interface AftertouchState {
   direction: number;
 }
 
-type ParticleKind = 'spark' | 'ember';
+type ParticleKind = 'spark' | 'ember' | 'shard';
 
 interface Particle {
   position: Vector2;
@@ -66,6 +66,8 @@ interface Particle {
   stretch: number;
   drag: number;
   type: ParticleKind;
+  target?: Vector2;
+  attraction?: number;
 }
 
 interface FloatingText {
@@ -130,6 +132,11 @@ export class Game {
   private impactWaves: ImpactWave[] = [];
   private backgroundStars: BackgroundStar[] = [];
   private backgroundRibbons: EnergyRibbon[] = [];
+  private novaAnchor: Vector2 = { x: 0, y: 0 };
+  private novaCharge = 0;
+  private readonly novaChargeMax = 100;
+  private readonly novaChargePerKill = 20;
+  private readonly novaName = 'Nova Pulse';
   private screenShakeOffset: Vector2 = { x: 0, y: 0 };
   private screenShakeTimer = 0;
   private screenShakeDuration = 0;
@@ -188,6 +195,7 @@ export class Game {
     this.width = canvas.width;
     this.height = canvas.height;
     this.cannonPosition = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
+    this.novaAnchor = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
 
     this.waveManager = new WaveManager(this);
     this.availableMajorModifiers = [...MAJOR_MODIFIERS];
@@ -197,6 +205,10 @@ export class Game {
     this.difficulty = difficulty;
 
     this.seedBackdrop();
+
+    this.hud.onSpecialRequested(() => {
+      this.tryActivateNovaPulse();
+    });
 
     this.pauseOverlay.onResumeRequested(() => {
       if (this.paused && !this.pauseLocked) {
@@ -447,6 +459,16 @@ export class Game {
     this.comboHeat += 1;
     this.comboTimer = 0;
     this.focus = clamp(this.focus + 10, 0, 100);
+    this.chargeNovaPulse(enemy.position);
+  }
+
+  private chargeNovaPulse(origin: Vector2) {
+    const wasReady = this.isNovaPulseReady();
+    this.novaCharge = clamp(this.novaCharge + this.novaChargePerKill, 0, this.novaChargeMax);
+    this.spawnNovaShards(origin);
+    if (!wasReady && this.isNovaPulseReady()) {
+      this.spawnNovaReadyPulse();
+    }
   }
 
   onEnemyBreach(_enemy: Enemy) {
@@ -739,6 +761,12 @@ export class Game {
     this.width = this.canvas.width / window.devicePixelRatio;
     this.height = this.canvas.height / window.devicePixelRatio;
     this.cannonPosition = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
+    this.novaAnchor = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
+    for (const particle of this.particles) {
+      if (particle.type === 'shard') {
+        particle.target = { ...this.novaAnchor };
+      }
+    }
   };
 
   private loop = (time: number) => {
@@ -796,6 +824,21 @@ export class Game {
     }
 
     for (const particle of this.particles) {
+      if (particle.type === 'shard' && particle.target) {
+        const toTarget = subtract(particle.target, particle.position);
+        const distance = length(toTarget);
+        if (distance > 0.001) {
+          const direction = scale(toTarget, 1 / distance);
+          const pull = (particle.attraction ?? 240) * dt;
+          particle.velocity.x += direction.x * pull;
+          particle.velocity.y += direction.y * pull;
+          if (distance < 38) {
+            particle.life -= dt * 1.5;
+            particle.rotationSpeed *= 1.02;
+          }
+        }
+      }
+
       particle.life -= dt;
       particle.position = add(particle.position, scale(particle.velocity, dt));
       const drag = Math.pow(particle.drag, dt * 60);
@@ -803,6 +846,9 @@ export class Game {
       particle.velocity.y *= drag;
       if (particle.type === 'ember') {
         particle.velocity.y += 40 * dt;
+      } else if (particle.type === 'shard') {
+        particle.velocity.x *= 0.96;
+        particle.velocity.y *= 0.96;
       }
       particle.rotation += particle.rotationSpeed * dt;
     }
@@ -1014,6 +1060,84 @@ export class Game {
     }
   }
 
+  private spawnNovaShards(origin: Vector2, count = 10) {
+    const target = { ...this.novaAnchor };
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const offset = randomRange(6, 42);
+      const start = {
+        x: origin.x + Math.cos(angle) * offset,
+        y: origin.y + Math.sin(angle) * offset,
+      };
+      const launchSpeed = randomRange(110, 220);
+      const velocity = {
+        x: Math.cos(angle) * launchSpeed,
+        y: Math.sin(angle) * launchSpeed - randomRange(70, 160),
+      };
+      const life = randomRange(0.9, 1.6);
+      const shard: Particle = {
+        position: start,
+        velocity,
+        life,
+        maxLife: life,
+        size: randomRange(18, 26),
+        color: '#a0fff0',
+        glow: 'rgba(126, 255, 226, 0.95)',
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: randomRange(-5, 5),
+        stretch: randomRange(0.5, 1.05),
+        drag: 0.9,
+        type: 'shard',
+        target: { ...target },
+        attraction: randomRange(240, 360),
+      };
+      this.particles.push(shard);
+    }
+  }
+
+  private spawnNovaReadyPulse() {
+    this.spawnImpactWave(this.novaAnchor, 220, 0.6, 'rgba(120, 255, 230, 0.82)');
+    this.spawnParticles(this.novaAnchor, '#74ffe6', 18, 180, 140);
+  }
+
+  private spawnNovaBurst() {
+    this.spawnImpactWave(this.novaAnchor, 280, 0.75, 'rgba(136, 255, 236, 0.9)');
+    this.spawnImpactWave(this.novaAnchor, 180, 0.55, 'rgba(82, 255, 236, 0.9)');
+    this.spawnParticles(this.novaAnchor, '#7effe8', 26, 260, 220);
+    this.spawnParticles(this.novaAnchor, '#b2fff6', 14, 160, 140);
+  }
+
+  private tryActivateNovaPulse() {
+    if (!this.running || this.paused || this.drafting || this.lives <= 0) {
+      return;
+    }
+    if (!this.isNovaPulseReady()) {
+      return;
+    }
+    this.activateNovaPulse();
+  }
+
+  private activateNovaPulse() {
+    this.spawnNovaBurst();
+    this.novaCharge = 0;
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const capped = Math.min(enemy.position.y, this.height - this.bottomSafeZone - 80);
+      enemy.position.y = Math.max(40, capped - 200);
+      enemy.velocity.y = Math.min(enemy.velocity.y, -420);
+      enemy.applyKnockback(620);
+      enemy.applySlow(3.8, 0.4);
+      this.spawnParticles(enemy.position, '#80ffe8', 6, 160, 120);
+    }
+    this.addScreenShake(9, 0.55);
+    this.spawnNovaShards(this.novaAnchor, 14);
+    this.updateHud();
+  }
+
+  private isNovaPulseReady() {
+    return this.novaCharge >= this.novaChargeMax - 0.01;
+  }
+
   private launchOrb(target: Vector2) {
     const drag = subtract(this.cannonPosition, target);
     const power = length(drag);
@@ -1151,6 +1275,7 @@ export class Game {
     this.screenShakeTimer = 0;
     this.screenShakeDuration = 0;
     this.screenShakeIntensity = 0;
+    this.novaCharge = 0;
     this.availableMajorModifiers = [...MAJOR_MODIFIERS];
     this.modifiers = this.createInitialModifiers();
     this.playerModifierCounts.clear();
@@ -1178,6 +1303,7 @@ export class Game {
     const heat = Math.floor(this.comboHeat);
     const tier = Math.floor(heat / 5);
     const progress = (this.comboHeat % 5) / 5;
+    const specialReady = this.isNovaPulseReady();
     const data: HudData = {
       score: Math.floor(this.score),
       comboHeat: heat,
@@ -1187,6 +1313,10 @@ export class Game {
       lives: this.lives,
       wave: this.waveManager.waveNumber,
       lastModifier: this.modifiers.lastPicked,
+      specialCharge: this.novaCharge,
+      specialMax: this.novaChargeMax,
+      specialReady,
+      specialName: this.novaName,
     };
     this.hud.update(data);
   }
@@ -1288,7 +1418,7 @@ export class Game {
         ctx.moveTo(-length, 0);
         ctx.lineTo(length, 0);
         ctx.stroke();
-      } else {
+      } else if (particle.type === 'ember') {
         const radius = particle.size * (0.6 + particle.stretch * 0.4 * ratio);
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
         gradient.addColorStop(0, particle.glow);
@@ -1298,6 +1428,25 @@ export class Game {
         ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.rotate(particle.rotation);
+        const length = particle.size * (1.1 + (1 - ratio) * 0.6);
+        const width = particle.size * 0.55;
+        const gradient = ctx.createLinearGradient(0, -length, 0, length);
+        gradient.addColorStop(0, 'rgba(56, 243, 255, 0)');
+        gradient.addColorStop(0.45, particle.glow);
+        gradient.addColorStop(1, particle.color);
+        ctx.globalAlpha = Math.pow(Math.max(ratio, 0.2), 0.8);
+        ctx.fillStyle = gradient;
+        ctx.shadowColor = particle.glow;
+        ctx.shadowBlur = 20 * ratio + 6;
+        ctx.beginPath();
+        ctx.moveTo(0, -length);
+        ctx.lineTo(width, 0);
+        ctx.lineTo(0, length);
+        ctx.lineTo(-width, 0);
+        ctx.closePath();
         ctx.fill();
       }
       ctx.restore();
