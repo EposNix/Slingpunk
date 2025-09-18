@@ -75,6 +75,14 @@ export class WaveManager {
     const tuning = buildEnemyTuning(waveNumber);
     this.scaling = tuning.scaling;
 
+    this.game.onWaveStart({
+      blueprintId: blueprint.waveId,
+      waveNumber,
+      modifiers: tuning.modifiers,
+      scaling: tuning.scaling,
+    });
+
+    const introDelay = this.game.consumeWaveIntroDelay();
     this.spawns = blueprint.enemies.map((config) => {
       const scaledConfig: WaveEnemyConfig = {
         type: config.type,
@@ -86,15 +94,9 @@ export class WaveManager {
       return {
         config: scaledConfig,
         spawned: 0,
-        nextTime: this.elapsed + Math.random() * Math.min(2, scaledConfig.cadence),
+        nextTime:
+          this.elapsed + introDelay + Math.random() * Math.min(2, scaledConfig.cadence),
       };
-    });
-
-    this.game.onWaveStart({
-      blueprintId: blueprint.waveId,
-      waveNumber,
-      modifiers: tuning.modifiers,
-      scaling: tuning.scaling,
     });
   }
 

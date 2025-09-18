@@ -112,6 +112,17 @@ interface EnergyRibbon {
   phase: number;
 }
 
+type RGBColor = [number, number, number];
+
+interface WaveTransitionEffect {
+  phase: 'intro' | 'outro';
+  time: number;
+  duration: number;
+  label: string;
+  subtitle?: string;
+  accent: RGBColor;
+}
+
 export class Game {
   public readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -139,6 +150,8 @@ export class Game {
   private readonly novaChargeMax = 100;
   private readonly novaChargePerKill = 7;
   private readonly novaName = 'Nova Pulse';
+  private waveTransition: WaveTransitionEffect | null = null;
+  private waveIntroDelay = 0;
   private screenShakeOffset: Vector2 = { x: 0, y: 0 };
   private screenShakeTimer = 0;
   private screenShakeDuration = 0;
@@ -303,6 +316,27 @@ export class Game {
     this.hud.showToast(messageParts.join(' · '), duration);
     this.pauseOverlay.setEnemyModifiers(info.modifiers);
     this.updateHud();
+
+    const subtitle =
+      messageParts.length > 1
+        ? messageParts
+            .slice(1)
+            .map((part) => part.replace('Mutations:', '').trim())
+            .join(' · ')
+        : 'Hold the line';
+    this.triggerWaveTransition('intro', {
+      label: `Wave ${info.waveNumber}`,
+      subtitle,
+      accent: [86, 255, 226],
+      duration: 1.65,
+    });
+    this.scheduleWaveIntroDelay(1.35);
+    this.spawnImpactWave(
+      { x: this.width / 2, y: this.height - this.bottomSafeZone * 0.55 },
+      this.width * 0.55,
+      0.65,
+      'rgba(86, 255, 226, 0.45)',
+    );
   }
 
   onWaveComplete() {
@@ -311,6 +345,19 @@ export class Game {
     this.focus = clamp(this.focus + 15, 0, 100);
     this.completedWaves += 1;
     this.updateHud();
+    const clearedWave = Math.max(1, this.completedWaves);
+    this.triggerWaveTransition('outro', {
+      label: `Wave ${clearedWave} Cleared`,
+      subtitle: 'Prepare your next upgrade',
+      accent: [255, 143, 226],
+      duration: 1.8,
+    });
+    this.spawnImpactWave(
+      { x: this.width / 2, y: this.height - this.bottomSafeZone * 0.55 },
+      this.width * 0.65,
+      0.75,
+      'rgba(255, 143, 226, 0.55)',
+    );
     void this.beginModifierDraft();
   }
 
@@ -921,6 +968,13 @@ export class Game {
       this.screenShakeDuration = 0;
     }
 
+    if (this.waveTransition) {
+      this.waveTransition.time += dt;
+      if (this.waveTransition.time >= this.waveTransition.duration) {
+        this.waveTransition = null;
+      }
+    }
+
     this.updateHud();
   }
 
@@ -1305,6 +1359,8 @@ export class Game {
     this.particles = [];
     this.floatingTexts = [];
     this.impactWaves = [];
+    this.waveTransition = null;
+    this.waveIntroDelay = 0;
     this.screenShakeOffset = { x: 0, y: 0 };
     this.screenShakeTimer = 0;
     this.screenShakeDuration = 0;
@@ -1354,6 +1410,120 @@ export class Game {
       specialName: this.novaName,
     };
     this.hud.update(data);
+  }
+
+  private triggerWaveTransition(
+    phase: 'intro' | 'outro',
+    options: { label: string; subtitle?: string; accent: RGBColor; duration?: number },
+  ) {
+    const duration = options.duration ?? (phase === 'intro' ? 1.6 : 1.8);
+    this.waveTransition = {
+      phase,
+      time: 0,
+      duration,
+      label: options.label,
+      subtitle: options.subtitle,
+      accent: options.accent,
+    };
+  }
+
+  private scheduleWaveIntroDelay(duration: number) {
+    this.waveIntroDelay = Math.max(this.waveIntroDelay, duration);
+  }
+
+  public consumeWaveIntroDelay(): number {
+    const delay = this.waveIntroDelay;
+    this.waveIntroDelay = 0;
+    return delay;
+  }
+
+  private drawWaveTransition(ctx: CanvasRenderingContext2D) {
+    const transition = this.waveTransition;
+    if (!transition) return;
+
+    const progress = clamp(transition.time / transition.duration, 0, 1);
+    const overlayStrength =
+      transition.phase === 'intro'
+        ? 1 - this.easeOutCubic(progress)
+        : Math.sin(progress * Math.PI);
+    const pulse =
+      transition.phase === 'intro'
+        ? this.easeOutCubic(progress)
+        : this.easeOutCubic(Math.min(1, progress * 1.2));
+    const centerX = this.width / 2;
+    const centerY = this.height - this.bottomSafeZone * 0.55;
+    const reach = Math.max(this.width, this.height);
+    const radius = reach * (0.35 + pulse * 0.5);
+
+    ctx.save();
+    ctx.fillStyle = `rgba(5, 10, 24, ${overlayStrength * (transition.phase === 'intro' ? 0.92 : 0.78)})`;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    ctx.globalCompositeOperation = 'lighter';
+    const halo = ctx.createRadialGradient(centerX, centerY, radius * 0.15, centerX, centerY, radius);
+    halo.addColorStop(0, this.rgba(transition.accent, 0.28 * pulse));
+    halo.addColorStop(0.55, this.rgba(transition.accent, 0.08 * pulse));
+    halo.addColorStop(1, this.rgba(transition.accent, 0));
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const sweeps = 3;
+    for (let i = 0; i < sweeps; i += 1) {
+      const offset = (pulse + i * 0.2) % 1;
+      const ringRadius = radius * (0.6 + offset * 0.22);
+      const sweep = Math.PI * (1.5 + i * 0.18);
+      const baseAngle = -Math.PI / 2 + this.easeInOutCubic(progress) * Math.PI * (transition.phase === 'intro' ? 1.4 : 1.1);
+      ctx.save();
+      ctx.globalAlpha = clamp(pulse * (1 - i * 0.24), 0, 1);
+      ctx.lineWidth = Math.max(2, 10 - i * 3 - pulse * 4);
+      ctx.strokeStyle = this.rgba(transition.accent, 0.85);
+      ctx.shadowBlur = 42 * (1 - i * 0.22);
+      ctx.shadowColor = this.rgba(transition.accent, 0.6);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, ringRadius, baseAngle, baseAngle + sweep, false);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+
+    const titleAlpha = transition.phase === 'intro' ? pulse : Math.sin(Math.min(1, progress) * Math.PI * 0.9);
+    const subtitleAlpha = transition.phase === 'intro' ? clamp(pulse - 0.25, 0, 1) : clamp(Math.pow(pulse, 0.8), 0, 1);
+    const titleSize = 66 + pulse * 12;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = this.rgba([230, 244, 255], titleAlpha);
+    ctx.font = `700 ${titleSize}px Rajdhani, sans-serif`;
+    ctx.fillText(transition.label, centerX, centerY - 26);
+
+    if (transition.subtitle) {
+      ctx.fillStyle = this.rgba([166, 205, 255], subtitleAlpha * 0.9);
+      ctx.font = `500 ${28 + pulse * 6}px Rajdhani, sans-serif`;
+      ctx.fillText(transition.subtitle, centerX, centerY + 28);
+    }
+
+    ctx.restore();
+  }
+
+  private rgba(color: RGBColor, alpha: number) {
+    const [r, g, b] = color;
+    return `rgba(${r}, ${g}, ${b}, ${clamp(alpha, 0, 1)})`;
+  }
+
+  private easeOutCubic(t: number) {
+    const clamped = clamp(t, 0, 1);
+    return 1 - Math.pow(1 - clamped, 3);
+  }
+
+  private easeInOutCubic(t: number) {
+    const clamped = clamp(t, 0, 1);
+    if (clamped < 0.5) {
+      return 4 * clamped * clamped * clamped;
+    }
+    return 1 - Math.pow(-2 * clamped + 2, 3) / 2;
   }
 
   private render() {
@@ -1628,6 +1798,8 @@ export class Game {
       ctx.restore();
     }
     ctx.restore();
+
+    this.drawWaveTransition(ctx);
   }
 
   private drawAim(ctx: CanvasRenderingContext2D) {
