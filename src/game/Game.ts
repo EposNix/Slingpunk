@@ -137,7 +137,7 @@ export class Game {
   private novaAnchor: Vector2 = { x: 0, y: 0 };
   private novaCharge = 0;
   private readonly novaChargeMax = 100;
-  private readonly novaChargePerKill = 20;
+  private readonly novaChargePerKill = 7;
   private readonly novaName = 'Nova Pulse';
   private screenShakeOffset: Vector2 = { x: 0, y: 0 };
   private screenShakeTimer = 0;
@@ -467,8 +467,11 @@ export class Game {
   private chargeNovaPulse(origin: Vector2) {
     const wasReady = this.isNovaPulseReady();
     this.novaCharge = clamp(this.novaCharge + this.novaChargePerKill, 0, this.novaChargeMax);
-    this.spawnNovaShards(origin);
-    if (!wasReady && this.isNovaPulseReady()) {
+    const isReady = this.isNovaPulseReady();
+    if (!isReady) {
+      this.spawnNovaShards(origin);
+    }
+    if (!wasReady && isReady) {
       this.spawnNovaReadyPulse();
     }
   }
@@ -838,12 +841,15 @@ export class Game {
         const distance = length(toTarget);
         if (distance > 0.001) {
           const direction = scale(toTarget, 1 / distance);
-          const pull = (particle.attraction ?? 240) * dt;
-          particle.velocity.x += direction.x * pull;
-          particle.velocity.y += direction.y * pull;
-          if (distance < 38) {
-            particle.life -= dt * 1.5;
-            particle.rotationSpeed *= 1.02;
+          const pullStrength = particle.attraction ?? 10;
+          const desiredSpeed = clamp(distance * 8 + 300, 420, 1600);
+          const desiredVelocity = scale(direction, desiredSpeed);
+          const blend = 1 - Math.exp(-pullStrength * dt);
+          particle.velocity.x += (desiredVelocity.x - particle.velocity.x) * blend;
+          particle.velocity.y += (desiredVelocity.y - particle.velocity.y) * blend;
+          if (distance < 42) {
+            particle.life -= dt * 3.5;
+            particle.rotationSpeed *= 1.04;
           }
         }
       }
@@ -1098,7 +1104,7 @@ export class Game {
         drag: 0.9,
         type: 'shard',
         target: { ...target },
-        attraction: randomRange(240, 360),
+        attraction: randomRange(14, 20),
       };
       this.particles.push(shard);
     }
