@@ -123,6 +123,17 @@ interface WaveTransitionEffect {
   accent: RGBColor;
 }
 
+interface PerformanceProfile {
+  isMobile: boolean;
+  pixelRatio: number;
+  particleMultiplier: number;
+  floatingTextLimit: number;
+  enableShadows: boolean;
+  backgroundDensity: number;
+  enableBackgroundRibbons: boolean;
+  maxParticles: number;
+}
+
 export class Game {
   public readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -130,18 +141,22 @@ export class Game {
   private readonly draft: PowerDraftOverlay;
   private readonly pauseOverlay: PauseOverlay;
 
+  private readonly performance: PerformanceProfile = this.detectPerformanceProfile();
+
   public width: number;
   public height: number;
   public readonly bottomSafeZone = 180;
   public readonly baseEnemySpeed = 55;
-  private readonly floatingTextLimit = 80;
+  private floatingTextLimit: number;
   private readonly minDamageForFloatingText = 1;
 
   public orbs: Orb[] = [];
   public enemies: Enemy[] = [];
 
   private particles: Particle[] = [];
+  private particlePool: Particle[] = [];
   private floatingTexts: FloatingText[] = [];
+  private floatingTextPool: FloatingText[] = [];
   private impactWaves: ImpactWave[] = [];
   private backgroundStars: BackgroundStar[] = [];
   private backgroundRibbons: EnergyRibbon[] = [];
@@ -207,6 +222,10 @@ export class Game {
     this.hud = hud;
     this.draft = draft;
     this.pauseOverlay = pauseOverlay;
+
+    this.floatingTextLimit = this.performance.floatingTextLimit;
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = this.performance.isMobile ? 'medium' : 'high';
 
     this.width = canvas.width;
     this.height = canvas.height;
@@ -659,25 +678,32 @@ export class Game {
     } = {},
   ) {
     const life = options.life ?? 0.8;
-    const jitter = {
-      x: (Math.random() - 0.5) * 22,
-      y: (Math.random() - 0.5) * 16,
-    };
-    const text: FloatingText = {
-      position: { x: origin.x + jitter.x, y: origin.y + jitter.y },
-      velocity: options.velocity ? { ...options.velocity } : { x: 0, y: -120 },
-      life,
-      maxLife: life,
-      value,
-      size: options.size ?? 26,
-      color: options.color ?? '#ffffff',
-      stroke: options.stroke,
-      weight: options.weight ?? 700,
-      pop: options.pop ?? 0.4,
-    };
+    const jitterX = (Math.random() - 0.5) * 22;
+    const jitterY = (Math.random() - 0.5) * 16;
+    const text = this.allocateFloatingText();
+    text.position.x = origin.x + jitterX;
+    text.position.y = origin.y + jitterY;
+    if (options.velocity) {
+      text.velocity.x = options.velocity.x;
+      text.velocity.y = options.velocity.y;
+    } else {
+      text.velocity.x = 0;
+      text.velocity.y = -120;
+    }
+    text.life = life;
+    text.maxLife = life;
+    text.value = value;
+    text.size = options.size ?? 26;
+    text.color = options.color ?? '#ffffff';
+    text.stroke = options.stroke;
+    text.weight = options.weight ?? 700;
+    text.pop = options.pop ?? 0.4;
     if (this.floatingTexts.length >= this.floatingTextLimit) {
       const overflow = this.floatingTexts.length - this.floatingTextLimit + 1;
-      this.floatingTexts.splice(0, overflow);
+      const removed = this.floatingTexts.splice(0, overflow);
+      for (const item of removed) {
+        this.recycleFloatingText(item);
+      }
     }
     this.floatingTexts.push(text);
   }
@@ -839,17 +865,22 @@ export class Game {
 
   private onResize = () => {
     const rect = this.canvas.getBoundingClientRect();
-    const ratio = rect.width / this.width;
-    this.canvas.width = rect.width * window.devicePixelRatio;
-    this.canvas.height = rect.height * window.devicePixelRatio;
-    this.ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-    this.width = this.canvas.width / window.devicePixelRatio;
-    this.height = this.canvas.height / window.devicePixelRatio;
+    const pixelRatio = Math.min(window.devicePixelRatio ?? 1, this.performance.pixelRatio);
+    this.canvas.width = rect.width * pixelRatio;
+    this.canvas.height = rect.height * pixelRatio;
+    this.ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    this.width = this.canvas.width / pixelRatio;
+    this.height = this.canvas.height / pixelRatio;
     this.cannonPosition = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
     this.novaAnchor = { x: this.width / 2, y: this.height - this.bottomSafeZone / 2 };
     for (const particle of this.particles) {
       if (particle.type === 'shard') {
-        particle.target = { ...this.novaAnchor };
+        if (!particle.target) {
+          particle.target = { x: this.novaAnchor.x, y: this.novaAnchor.y };
+        } else {
+          particle.target.x = this.novaAnchor.x;
+          particle.target.y = this.novaAnchor.y;
+        }
       }
     }
   };
@@ -909,18 +940,22 @@ export class Game {
       this.comboHeat = Math.max(0, this.comboHeat - dt * 2);
     }
 
-    for (const particle of this.particles) {
+    let particleWriteIndex = 0;
+    for (let i = 0; i < this.particles.length; i++) {
+      const particle = this.particles[i];
       if (particle.type === 'shard' && particle.target) {
-        const toTarget = subtract(particle.target, particle.position);
-        const distance = length(toTarget);
+        const dx = particle.target.x - particle.position.x;
+        const dy = particle.target.y - particle.position.y;
+        const distance = Math.hypot(dx, dy);
         if (distance > 0.001) {
-          const direction = scale(toTarget, 1 / distance);
           const pullStrength = particle.attraction ?? 10;
           const desiredSpeed = clamp(distance * 8 + 300, 420, 1600);
-          const desiredVelocity = scale(direction, desiredSpeed);
+          const invDistance = 1 / distance;
+          const desiredVelocityX = dx * invDistance * desiredSpeed;
+          const desiredVelocityY = dy * invDistance * desiredSpeed;
           const blend = 1 - Math.exp(-pullStrength * dt);
-          particle.velocity.x += (desiredVelocity.x - particle.velocity.x) * blend;
-          particle.velocity.y += (desiredVelocity.y - particle.velocity.y) * blend;
+          particle.velocity.x += (desiredVelocityX - particle.velocity.x) * blend;
+          particle.velocity.y += (desiredVelocityY - particle.velocity.y) * blend;
           if (distance < 42) {
             particle.life -= dt * 3.5;
             particle.rotationSpeed *= 1.04;
@@ -929,7 +964,8 @@ export class Game {
       }
 
       particle.life -= dt;
-      particle.position = add(particle.position, scale(particle.velocity, dt));
+      particle.position.x += particle.velocity.x * dt;
+      particle.position.y += particle.velocity.y * dt;
       const drag = Math.pow(particle.drag, dt * 60);
       particle.velocity.x *= drag;
       particle.velocity.y *= drag;
@@ -940,21 +976,39 @@ export class Game {
         particle.velocity.y *= 0.96;
       }
       particle.rotation += particle.rotationSpeed * dt;
+      if (particle.life > 0) {
+        this.particles[particleWriteIndex++] = particle;
+      } else {
+        this.recycleParticle(particle);
+      }
     }
-    this.particles = this.particles.filter((p) => p.life > 0);
+    this.particles.length = particleWriteIndex;
 
-    for (const text of this.floatingTexts) {
+    let textWriteIndex = 0;
+    for (let i = 0; i < this.floatingTexts.length; i++) {
+      const text = this.floatingTexts[i];
       text.life -= dt;
-      text.position = add(text.position, scale(text.velocity, dt));
+      text.position.x += text.velocity.x * dt;
+      text.position.y += text.velocity.y * dt;
       text.velocity.x *= 0.92;
       text.velocity.y *= 0.92;
+      if (text.life > 0) {
+        this.floatingTexts[textWriteIndex++] = text;
+      } else {
+        this.recycleFloatingText(text);
+      }
     }
-    this.floatingTexts = this.floatingTexts.filter((text) => text.life > 0);
+    this.floatingTexts.length = textWriteIndex;
 
-    for (const wave of this.impactWaves) {
+    let waveWriteIndex = 0;
+    for (let i = 0; i < this.impactWaves.length; i++) {
+      const wave = this.impactWaves[i];
       wave.life -= dt;
+      if (wave.life > 0) {
+        this.impactWaves[waveWriteIndex++] = wave;
+      }
     }
-    this.impactWaves = this.impactWaves.filter((wave) => wave.life > 0);
+    this.impactWaves.length = waveWriteIndex;
 
     if (this.screenShakeTimer > 0) {
       this.screenShakeTimer = Math.max(0, this.screenShakeTimer - dt);
@@ -1119,74 +1173,148 @@ export class Game {
     return enemy.isBoss || enemy.isElite;
   }
 
+  private allocateParticle(): Particle {
+    const pooled = this.particlePool.pop();
+    if (pooled) {
+      pooled.attraction = undefined;
+      return pooled;
+    }
+    return {
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 0 },
+      life: 0,
+      maxLife: 0,
+      size: 0,
+      color: '',
+      glow: '',
+      rotation: 0,
+      rotationSpeed: 0,
+      stretch: 1,
+      drag: 1,
+      type: 'spark',
+    };
+  }
+
+  private recycleParticle(particle: Particle) {
+    particle.attraction = undefined;
+    particle.life = 0;
+    particle.maxLife = 0;
+    this.particlePool.push(particle);
+  }
+
+  private allocateFloatingText(): FloatingText {
+    const pooled = this.floatingTextPool.pop();
+    if (pooled) {
+      pooled.stroke = undefined;
+      return pooled;
+    }
+    return {
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 0 },
+      life: 0,
+      maxLife: 0,
+      value: '',
+      size: 0,
+      color: '#ffffff',
+      weight: 700,
+      pop: 0,
+    };
+  }
+
+  private recycleFloatingText(text: FloatingText) {
+    text.stroke = undefined;
+    text.life = 0;
+    text.maxLife = 0;
+    this.floatingTextPool.push(text);
+  }
+
   private spawnParticles(position: Vector2, color: string, count: number, speed: number, radius: number) {
-    for (let i = 0; i < count; i++) {
+    let actualCount = Math.floor(count * this.performance.particleMultiplier);
+    if (actualCount <= 0 && count > 0 && this.performance.particleMultiplier > 0) {
+      actualCount = 1;
+    }
+    const capacity = Math.max(0, this.performance.maxParticles - this.particles.length);
+    if (capacity <= 0) {
+      return;
+    }
+    actualCount = Math.min(actualCount, capacity);
+    for (let i = 0; i < actualCount; i++) {
       const type: ParticleKind = Math.random() < 0.65 ? 'spark' : 'ember';
       const baseAngle = Math.random() * Math.PI * 2;
       const spawnRadius = Math.random() * radius * 0.4;
-      const spawn = {
-        x: position.x + Math.cos(baseAngle) * spawnRadius,
-        y: position.y + Math.sin(baseAngle) * spawnRadius,
-      };
+      const spawnX = position.x + Math.cos(baseAngle) * spawnRadius;
+      const spawnY = position.y + Math.sin(baseAngle) * spawnRadius;
       const life = randomRange(0.4, 0.85);
       const magnitude = speed * (type === 'spark' ? randomRange(0.45, 1) : randomRange(0.2, 0.55));
-      const velocity = {
-        x: Math.cos(baseAngle) * magnitude,
-        y: Math.sin(baseAngle) * magnitude,
-      };
+      const velocityX = Math.cos(baseAngle) * magnitude;
+      const velocityY = Math.sin(baseAngle) * magnitude;
       const glow =
         type === 'spark'
           ? 'rgba(255, 255, 255, 0.65)'
           : 'rgba(255, 255, 255, 0.28)';
-      const particle: Particle = {
-        position: spawn,
-        velocity,
-        life,
-        maxLife: life,
-        size: type === 'spark' ? randomRange(14, 26) : randomRange(5, 11),
-        color,
-        glow,
-        rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: type === 'spark' ? randomRange(-8, 8) : randomRange(-2, 2),
-        stretch: type === 'spark' ? randomRange(1.3, 2.8) : randomRange(0.3, 1),
-        drag: type === 'spark' ? 0.82 : 0.9,
-        type,
-      };
+      const particle = this.allocateParticle();
+      particle.position.x = spawnX;
+      particle.position.y = spawnY;
+      particle.velocity.x = velocityX;
+      particle.velocity.y = velocityY;
+      particle.life = life;
+      particle.maxLife = life;
+      particle.size = type === 'spark' ? randomRange(14, 26) : randomRange(5, 11);
+      particle.color = color;
+      particle.glow = glow;
+      particle.rotation = Math.random() * Math.PI * 2;
+      particle.rotationSpeed = type === 'spark' ? randomRange(-8, 8) : randomRange(-2, 2);
+      particle.stretch = type === 'spark' ? randomRange(1.3, 2.8) : randomRange(0.3, 1);
+      particle.drag = type === 'spark' ? 0.82 : 0.9;
+      particle.type = type;
+      particle.target = undefined;
+      particle.attraction = undefined;
       this.particles.push(particle);
     }
   }
 
   private spawnNovaShards(origin: Vector2, count = 10) {
+    let actualCount = Math.floor(count * this.performance.particleMultiplier);
+    if (actualCount <= 0 && count > 0 && this.performance.particleMultiplier > 0) {
+      actualCount = 1;
+    }
+    const capacity = Math.max(0, this.performance.maxParticles - this.particles.length);
+    if (capacity <= 0) {
+      return;
+    }
+    actualCount = Math.min(actualCount, capacity);
     const target = { ...this.novaAnchor };
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < actualCount; i++) {
       const angle = Math.random() * Math.PI * 2;
       const offset = randomRange(6, 42);
-      const start = {
-        x: origin.x + Math.cos(angle) * offset,
-        y: origin.y + Math.sin(angle) * offset,
-      };
+      const startX = origin.x + Math.cos(angle) * offset;
+      const startY = origin.y + Math.sin(angle) * offset;
       const launchSpeed = randomRange(110, 220);
-      const velocity = {
-        x: Math.cos(angle) * launchSpeed,
-        y: Math.sin(angle) * launchSpeed - randomRange(70, 160),
-      };
+      const velocityX = Math.cos(angle) * launchSpeed;
+      const velocityY = Math.sin(angle) * launchSpeed - randomRange(70, 160);
       const life = randomRange(0.9, 1.6);
-      const shard: Particle = {
-        position: start,
-        velocity,
-        life,
-        maxLife: life,
-        size: randomRange(18, 26),
-        color: '#a0fff0',
-        glow: 'rgba(126, 255, 226, 0.95)',
-        rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: randomRange(-5, 5),
-        stretch: randomRange(0.5, 1.05),
-        drag: 0.9,
-        type: 'shard',
-        target: { ...target },
-        attraction: randomRange(14, 20),
-      };
+      const shard = this.allocateParticle();
+      shard.position.x = startX;
+      shard.position.y = startY;
+      shard.velocity.x = velocityX;
+      shard.velocity.y = velocityY;
+      shard.life = life;
+      shard.maxLife = life;
+      shard.size = randomRange(18, 26);
+      shard.color = '#a0fff0';
+      shard.glow = 'rgba(126, 255, 226, 0.95)';
+      shard.rotation = Math.random() * Math.PI * 2;
+      shard.rotationSpeed = randomRange(-5, 5);
+      shard.stretch = randomRange(0.5, 1.05);
+      shard.drag = 0.9;
+      shard.type = 'shard';
+      if (!shard.target) {
+        shard.target = { x: target.x, y: target.y };
+      } else {
+        shard.target.x = target.x;
+        shard.target.y = target.y;
+      }
+      shard.attraction = randomRange(14, 20);
       this.particles.push(shard);
     }
   }
@@ -1304,8 +1432,58 @@ export class Game {
     };
   }
 
+  private detectPerformanceProfile(): PerformanceProfile {
+    const hasWindow = typeof window !== 'undefined';
+    const baseRatio = hasWindow ? window.devicePixelRatio ?? 1 : 1;
+    const defaultProfile: PerformanceProfile = {
+      isMobile: false,
+      pixelRatio: baseRatio,
+      particleMultiplier: 1,
+      floatingTextLimit: 80,
+      enableShadows: true,
+      backgroundDensity: 1,
+      enableBackgroundRibbons: true,
+      maxParticles: 600,
+    };
+
+    if (!hasWindow || typeof navigator === 'undefined') {
+      return defaultProfile;
+    }
+
+    const ua = navigator.userAgent ?? '';
+    const coarsePointer = window.matchMedia?.('(pointer:coarse)')?.matches ?? false;
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || coarsePointer;
+    const prefersReducedMotion =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
+
+    if (!isMobile) {
+      const lowCore = navigator.hardwareConcurrency !== undefined && navigator.hardwareConcurrency <= 4;
+      if (lowCore) {
+        return {
+          ...defaultProfile,
+          particleMultiplier: 0.75,
+          maxParticles: 420,
+        };
+      }
+      return defaultProfile;
+    }
+
+    const mobileParticleMultiplier = prefersReducedMotion ? 0.25 : 0.5;
+    return {
+      isMobile: true,
+      pixelRatio: Math.min(1.5, baseRatio),
+      particleMultiplier: mobileParticleMultiplier,
+      floatingTextLimit: prefersReducedMotion ? 36 : 48,
+      enableShadows: false,
+      backgroundDensity: prefersReducedMotion ? 0.4 : 0.55,
+      enableBackgroundRibbons: !prefersReducedMotion,
+      maxParticles: prefersReducedMotion ? 160 : 240,
+    };
+  }
+
   private seedBackdrop() {
-    const starCount = 96;
+    const starCount = Math.max(24, Math.round(96 * this.performance.backgroundDensity));
     this.backgroundStars = Array.from({ length: starCount }, () => ({
       xPercent: Math.random(),
       yPercent: Math.random(),
@@ -1321,38 +1499,42 @@ export class Game {
             : 'rgba(124, 255, 205, 1)',
     }));
 
-    this.backgroundRibbons = [
-      {
-        offset: 0.28,
-        amplitude: 0.08,
-        frequency: 2.1,
-        speed: 0.32,
-        thickness: 90,
-        color: 'rgba(57, 116, 255, 0.18)',
-        glow: 'rgba(107, 196, 255, 0.45)',
-        phase: Math.random() * Math.PI * 2,
-      },
-      {
-        offset: 0.52,
-        amplitude: 0.06,
-        frequency: 2.8,
-        speed: 0.46,
-        thickness: 72,
-        color: 'rgba(255, 96, 188, 0.14)',
-        glow: 'rgba(255, 149, 231, 0.42)',
-        phase: Math.random() * Math.PI * 2,
-      },
-      {
-        offset: 0.74,
-        amplitude: 0.05,
-        frequency: 2.35,
-        speed: 0.38,
-        thickness: 58,
-        color: 'rgba(82, 255, 214, 0.12)',
-        glow: 'rgba(140, 255, 223, 0.38)',
-        phase: Math.random() * Math.PI * 2,
-      },
-    ];
+    if (this.performance.enableBackgroundRibbons) {
+      this.backgroundRibbons = [
+        {
+          offset: 0.28,
+          amplitude: 0.08,
+          frequency: 2.1,
+          speed: 0.32,
+          thickness: 90,
+          color: 'rgba(57, 116, 255, 0.18)',
+          glow: 'rgba(107, 196, 255, 0.45)',
+          phase: Math.random() * Math.PI * 2,
+        },
+        {
+          offset: 0.52,
+          amplitude: 0.06,
+          frequency: 2.8,
+          speed: 0.46,
+          thickness: 72,
+          color: 'rgba(255, 96, 188, 0.14)',
+          glow: 'rgba(255, 149, 231, 0.42)',
+          phase: Math.random() * Math.PI * 2,
+        },
+        {
+          offset: 0.74,
+          amplitude: 0.05,
+          frequency: 2.35,
+          speed: 0.38,
+          thickness: 58,
+          color: 'rgba(82, 255, 214, 0.12)',
+          glow: 'rgba(140, 255, 223, 0.38)',
+          phase: Math.random() * Math.PI * 2,
+        },
+      ];
+    } else {
+      this.backgroundRibbons = [];
+    }
   }
 
   private reset() {
@@ -1364,9 +1546,15 @@ export class Game {
     this.waveId = 'S1-W1';
     this.orbs = [];
     this.enemies = [];
-    this.particles = [];
-    this.floatingTexts = [];
-    this.impactWaves = [];
+    for (const particle of this.particles) {
+      this.recycleParticle(particle);
+    }
+    this.particles.length = 0;
+    for (const text of this.floatingTexts) {
+      this.recycleFloatingText(text);
+    }
+    this.floatingTexts.length = 0;
+    this.impactWaves.length = 0;
     this.waveTransition = null;
     this.waveIntroDelay = 0;
     this.screenShakeOffset = { x: 0, y: 0 };
@@ -1450,6 +1638,7 @@ export class Game {
     if (!transition) return;
 
     const progress = clamp(transition.time / transition.duration, 0, 1);
+    const enableShadows = this.performance.enableShadows;
     const overlayStrength =
       transition.phase === 'intro'
         ? 1 - this.easeOutCubic(progress)
@@ -1486,8 +1675,13 @@ export class Game {
       ctx.globalAlpha = clamp(pulse * (1 - i * 0.24), 0, 1);
       ctx.lineWidth = Math.max(2, 10 - i * 3 - pulse * 4);
       ctx.strokeStyle = this.rgba(transition.accent, 0.85);
-      ctx.shadowBlur = 42 * (1 - i * 0.22);
-      ctx.shadowColor = this.rgba(transition.accent, 0.6);
+      if (enableShadows) {
+        ctx.shadowBlur = 42 * (1 - i * 0.22);
+        ctx.shadowColor = this.rgba(transition.accent, 0.6);
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+      }
       ctx.beginPath();
       ctx.arc(centerX, centerY, ringRadius, baseAngle, baseAngle + sweep, false);
       ctx.stroke();
@@ -1539,6 +1733,7 @@ export class Game {
     ctx.clearRect(0, 0, this.width, this.height);
     ctx.save();
     ctx.translate(this.screenShakeOffset.x, this.screenShakeOffset.y);
+    const enableShadows = this.performance.enableShadows;
 
     this.drawBackground(ctx);
     this.drawAim(ctx);
@@ -1580,8 +1775,13 @@ export class Game {
       tailGradient.addColorStop(1, orb.color);
       ctx.fillStyle = tailGradient;
       ctx.globalAlpha = 0.45 + momentum * 0.4;
-      ctx.shadowColor = orb.color;
-      ctx.shadowBlur = 24 + momentum * 30;
+      if (enableShadows) {
+        ctx.shadowColor = orb.color;
+        ctx.shadowBlur = 24 + momentum * 30;
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+      }
       ctx.beginPath();
       ctx.moveTo(-tailLength, -tailWidth * 0.6);
       ctx.quadraticCurveTo(-tailLength * 0.3, 0, -tailLength, tailWidth * 0.6);
@@ -1625,8 +1825,13 @@ export class Game {
         ctx.globalAlpha = Math.pow(ratio, 0.55);
         ctx.lineWidth = width;
         ctx.strokeStyle = gradient;
-        ctx.shadowColor = particle.glow;
-        ctx.shadowBlur = 18 * ratio;
+        if (enableShadows) {
+          ctx.shadowColor = particle.glow;
+          ctx.shadowBlur = 18 * ratio;
+        } else {
+          ctx.shadowBlur = 0;
+          ctx.shadowColor = 'transparent';
+        }
         ctx.beginPath();
         ctx.moveTo(-length, 0);
         ctx.lineTo(length, 0);
@@ -1652,8 +1857,13 @@ export class Game {
         gradient.addColorStop(1, particle.color);
         ctx.globalAlpha = Math.pow(Math.max(ratio, 0.2), 0.8);
         ctx.fillStyle = gradient;
-        ctx.shadowColor = particle.glow;
-        ctx.shadowBlur = 20 * ratio + 6;
+        if (enableShadows) {
+          ctx.shadowColor = particle.glow;
+          ctx.shadowBlur = 20 * ratio + 6;
+        } else {
+          ctx.shadowBlur = 0;
+          ctx.shadowColor = 'transparent';
+        }
         ctx.beginPath();
         ctx.moveTo(0, -length);
         ctx.lineTo(width, 0);
@@ -1696,8 +1906,13 @@ export class Game {
     const intensity = (Math.sin(this.lastTime * 0.012) + 1) * 0.25 + 0.45;
     ctx.globalAlpha = intensity;
     ctx.lineWidth = 3.5;
-    ctx.shadowBlur = 18;
-    ctx.shadowColor = 'rgba(118, 169, 255, 0.85)';
+    if (this.performance.enableShadows) {
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = 'rgba(118, 169, 255, 0.85)';
+    } else {
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
+    }
     for (let i = 0; i < alive.length; i++) {
       for (let j = i + 1; j < alive.length; j++) {
         const a = alive[i];
@@ -1717,6 +1932,7 @@ export class Game {
 
   private drawBackground(ctx: CanvasRenderingContext2D) {
     ctx.save();
+    const enableShadows = this.performance.enableShadows;
     const base = ctx.createLinearGradient(0, 0, 0, this.height);
     base.addColorStop(0, '#06061b');
     base.addColorStop(0.45, '#07041a');
@@ -1741,8 +1957,13 @@ export class Game {
       ctx.globalAlpha = 0.18;
       ctx.strokeStyle = ribbon.color;
       ctx.lineWidth = ribbon.thickness;
-      ctx.shadowColor = ribbon.glow;
-      ctx.shadowBlur = 120;
+      if (enableShadows) {
+        ctx.shadowColor = ribbon.glow;
+        ctx.shadowBlur = 120;
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+      }
       ctx.beginPath();
       for (let x = -200; x <= this.width + 200; x += 28) {
         const progress = (x / this.width) * Math.PI * frequency;
@@ -1767,8 +1988,13 @@ export class Game {
       const radius = star.radius * (0.6 + twinkle * 0.7);
       ctx.globalAlpha = 0.25 + twinkle * 0.65;
       ctx.fillStyle = star.color;
-      ctx.shadowColor = star.color;
-      ctx.shadowBlur = 14 * (0.3 + twinkle);
+      if (enableShadows) {
+        ctx.shadowColor = star.color;
+        ctx.shadowBlur = 14 * (0.3 + twinkle);
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+      }
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
