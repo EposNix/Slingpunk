@@ -253,13 +253,21 @@ export class Game {
   togglePause() {
     if (!this.running) return;
     if (this.pauseLocked) return;
-    if (this.pauseInputCooldown > 0) return;
-    this.paused = !this.paused;
-    this.hud.setPaused(this.paused);
-    this.syncPlayerModifiersOverlay();
-    this.pauseOverlay.setVisible(this.paused);
-    this.pauseInputCooldown = 0.2;
-    if (!this.paused) {
+    const wasPaused = this.paused;
+    if (!wasPaused && this.pauseInputCooldown > 0) return;
+
+    const nextPaused = !wasPaused;
+    this.paused = nextPaused;
+    this.hud.setPaused(nextPaused);
+    if (nextPaused) {
+      this.syncPlayerModifiersOverlay();
+    }
+    this.pauseOverlay.setVisible(nextPaused);
+
+    if (nextPaused) {
+      this.pauseInputCooldown = 0.2;
+    } else {
+      this.pauseInputCooldown = 0;
       this.lastTime = performance.now();
     }
   }
