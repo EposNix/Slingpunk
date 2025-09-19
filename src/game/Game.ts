@@ -396,6 +396,7 @@ export class Game {
     this.pauseLocked = true;
     this.paused = true;
     this.hud.setPaused(true);
+    this.pauseOverlay.setVisible(false);
 
     let cancelled = false;
     try {
