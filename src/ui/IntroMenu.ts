@@ -66,6 +66,7 @@ export class IntroMenu {
   show() {
     this.element.classList.add('visible');
     this.element.setAttribute('aria-hidden', 'false');
+    this.setInteractivity(true);
     if (this.selectedId) {
       this.cardLookup.get(this.selectedId)?.focus();
     } else {
@@ -76,6 +77,7 @@ export class IntroMenu {
   hide() {
     this.element.classList.remove('visible');
     this.element.setAttribute('aria-hidden', 'true');
+    this.setInteractivity(false);
   }
 
   selectDifficulty(id: string) {
@@ -93,16 +95,41 @@ export class IntroMenu {
     const next = this.cardLookup.get(id);
     if (!next) {
       this.selectedId = undefined;
-      this.startButton.disabled = true;
-      this.startButton.textContent = 'Launch Run';
+      this.refreshStartButton();
       return;
     }
 
     this.selectedId = id;
     next.classList.add('selected');
     next.setAttribute('aria-pressed', 'true');
+    this.refreshStartButton();
+  }
+
+  private refreshStartButton() {
+    if (!this.selectedId) {
+      this.startButton.disabled = true;
+      this.startButton.textContent = 'Launch Run';
+      return;
+    }
+
+    const difficulty = this.difficulties.find(
+      (entry) => entry.id === this.selectedId,
+    );
     this.startButton.disabled = false;
-    this.startButton.textContent = `Launch ${next.dataset.name ?? 'Run'}`;
+    this.startButton.textContent = `Launch ${difficulty?.name ?? 'Run'}`;
+  }
+
+  private setInteractivity(isEnabled: boolean) {
+    for (const card of this.cardLookup.values()) {
+      card.disabled = !isEnabled;
+    }
+
+    if (isEnabled) {
+      this.refreshStartButton();
+      return;
+    }
+
+    this.startButton.disabled = true;
   }
 
   private createDifficultyCard(difficulty: DifficultyDefinition) {
